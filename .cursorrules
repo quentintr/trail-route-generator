@@ -1,0 +1,65 @@
+# Trail Route Generator - Cursor Rules
+
+## General Guidelines
+- Always use TypeScript with strict mode
+- Write tests for all new features before implementation
+- Use functional components and hooks in React
+- Follow clean code principles
+- Keep functions small and focused
+
+## Code Style
+- Use ES6+ features
+- Prefer const over let, never use var
+- Use async/await over promises chains
+- Use meaningful variable names (no single letters except in loops)
+- Maximum line length: 100 characters
+
+## React Specific
+- Use function components with hooks
+- Create custom hooks for reusable logic
+- Keep components under 200 lines
+- Use TypeScript interfaces for props
+- Always handle loading and error states
+
+## Backend Specific
+- Use async/await for all database operations
+- Always validate input data
+- Use proper HTTP status codes
+- Handle errors with try-catch and proper error middleware
+- Use environment variables for configuration
+
+## Git Commit Messages
+- Format: "type: description"
+- Types: feat, fix, docs, style, refactor, test, chore
+- Keep first line under 72 characters
+
+## Testing
+- Write tests first (TDD approach)
+- Test happy path and edge cases
+- Use descriptive test names
+- Mock external dependencies
+
+## Geographic/Mapping
+- Use PostGIS for geographic queries
+- Always use SRID 4326 (WGS84) for coordinates
+- Store coordinates as [longitude, latitude] (GeoJSON format)
+- Use meters for distances internally
+
+## API Design
+- RESTful endpoints
+- Use proper HTTP verbs
+- Return consistent JSON structure
+- Include pagination for list endpoints
+- Version the API (/api/v1/)
+
+## Performance
+- Minimize database queries
+- Use indexes for geographic queries
+- Cache frequently accessed data
+- Lazy load components when appropriate
+
+## Documentation
+- Document complex algorithms
+- Add JSDoc comments for public functions
+- Keep README up to date
+- Document API endpoints
