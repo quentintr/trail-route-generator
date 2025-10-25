@@ -1,0 +1,118 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  routes  Route[]
+  reviews Review[]
+  trails  Trail[]
+
+  @@map("users")
+}
+
+model Trail {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  difficulty  Difficulty
+  distance    Float    // in kilometers
+  duration    Int      // in minutes
+  elevation   Float    // in meters
+  startPoint  Unsupported("Point") @db.Postgis
+  endPoint    Unsupported("Point") @db.Postgis
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviews Review[]
+
+  @@map("trails")
+}
+
+model Route {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  difficulty  Difficulty
+  distance    Float    // in kilometers
+  duration    Int      // in minutes
+  elevation   Float    // in meters
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  waypoints Waypoint[]
+  reviews   Review[]
+
+  @@map("routes")
+}
+
+model Waypoint {
+  id       String      @id @default(cuid())
+  name     String
+  latitude Float
+  longitude Float
+  type     WaypointType
+  description String?
+  location Unsupported("Point") @db.Postgis
+
+  // Relations
+  routeId String
+  route   Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@map("waypoints")
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int      @db.SmallInt
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trailId String?
+  trail   Trail? @relation(fields: [trailId], references: [id], onDelete: Cascade)
+  routeId String?
+  route   Route? @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, trailId])
+  @@unique([userId, routeId])
+  @@map("reviews")
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
+
+enum WaypointType {
+  START
+  END
+  WAYPOINT
+}
