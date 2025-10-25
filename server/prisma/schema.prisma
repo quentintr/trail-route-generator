@@ -42,7 +42,7 @@ model Route {
   
   // Geographic data using PostGIS geography type (SRID 4326)
   // Stores the complete route geometry as a LineString
-  geometry       Unsupported("geography(LineString, 4326)") @db.Postgis
+  geometry       Unsupported("geography(LineString, 4326)")
   
   // Relations
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -69,7 +69,7 @@ model Segment {
   
   // Geographic data using PostGIS geography type (SRID 4326)
   // Stores the segment geometry as a LineString
-  geometry         Unsupported("geography(LineString, 4326)") @db.Postgis
+  geometry         Unsupported("geography(LineString, 4326)")
   
   // Indexes for geographic and performance queries
   @@index([osm_id])
@@ -129,3 +129,5 @@ model Review {
 // - Spatial indexes are automatically created on geometry columns
 // - Use ST_GeomFromText() for coordinate transformations
 // - Consider using ST_Transform() for different coordinate systems
+
+
