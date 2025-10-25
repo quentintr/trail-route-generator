@@ -3,7 +3,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
 import dotenv from 'dotenv'
-import { PrismaClient } from '@prisma/client'
+import { connectDatabase, getDatabase, healthCheck } from './db'
 
 // Import routes
 import authRoutes from './routes/auth'
@@ -14,7 +14,6 @@ import routeRoutes from './routes/routes'
 dotenv.config()
 
 const app = express()
-const prisma = new PrismaClient()
 const PORT = process.env.PORT || 5000
 
 // Middleware
@@ -27,13 +26,21 @@ app.use(morgan('combined'))
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true }))
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  })
+// Health check with PostGIS status
+app.get('/health', async (req, res) => {
+  try {
+    const health = await healthCheck()
+    res.json({ 
+      ...health,
+      uptime: process.uptime()
+    })
+  } catch (error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: 'Health check failed',
+      timestamp: new Date().toISOString()
+    })
+  }
 })
 
 // API Routes
@@ -61,24 +68,24 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   })
 })
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down gracefully...')
-  await prisma.$disconnect()
-  process.exit(0)
-})
+// Start server with database connection
+const startServer = async () => {
+  try {
+    // Connect to database with PostGIS
+    await connectDatabase()
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`)
+      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
+      console.log(`🗄️  Database: Connected with PostGIS support`)
+      console.log(`🌍 Geographic queries: Enabled`)
+    })
+  } catch (error) {
+    console.error('❌ Failed to start server:', error)
+    process.exit(1)
+  }
+}
 
-process.on('SIGTERM', async () => {
-  console.log('Shutting down gracefully...')
-  await prisma.$disconnect()
-  process.exit(0)
-})
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
-  console.log(`🗄️  Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`)
-})
+startServer()
 
 export default app

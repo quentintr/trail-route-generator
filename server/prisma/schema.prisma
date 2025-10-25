@@ -10,109 +10,122 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// User model for authentication and user preferences
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  avatar    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password_hash String    // Hashed password using bcrypt
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  
+  // User preferences stored as JSONB for flexibility
+  preferences   Json?     // { difficulty_level, preferred_terrain, max_distance, etc. }
+  
   // Relations
-  routes  Route[]
-  reviews Review[]
-  trails  Trail[]
+  routes        Route[]
+  reviews       Review[]
 
   @@map("users")
 }
 
-model Trail {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  difficulty  Difficulty
-  distance    Float    // in kilometers
-  duration    Int      // in minutes
-  elevation   Float    // in meters
-  startPoint  Unsupported("Point") @db.Postgis
-  endPoint    Unsupported("Point") @db.Postgis
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  userId  String
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reviews Review[]
-
-  @@map("trails")
-}
-
+// Route model for user-generated trail routes
 model Route {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  difficulty  Difficulty
-  distance    Float    // in kilometers
-  duration    Int      // in minutes
-  elevation   Float    // in meters
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  id             String    @id @default(cuid())
+  user_id        String
+  name           String
+  distance       Float     // Distance in kilometers
+  elevation_gain Float     // Total elevation gain in meters
+  duration       Int       // Duration in minutes
+  terrain_type   String    // mountain, forest, coastal, urban, etc.
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  
+  // Geographic data using PostGIS geography type (SRID 4326)
+  // Stores the complete route geometry as a LineString
+  geometry       Unsupported("geography(LineString, 4326)") @db.Postgis
+  
   // Relations
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  waypoints Waypoint[]
-  reviews   Review[]
-
+  user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  reviews        Review[]
+  
+  // Indexes for geographic queries
+  @@index([user_id])
+  @@index([terrain_type])
+  @@index([distance])
+  @@index([created_at])
   @@map("routes")
 }
 
-model Waypoint {
-  id       String      @id @default(cuid())
-  name     String
-  latitude Float
-  longitude Float
-  type     WaypointType
-  description String?
-  location Unsupported("Point") @db.Postgis
-
-  // Relations
-  routeId String
-  route   Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
-
-  @@map("waypoints")
+// Segment model for popular route segments from OpenStreetMap
+model Segment {
+  id               String    @id @default(cuid())
+  osm_id           String    @unique // OpenStreetMap way ID
+  name             String?
+  surface_type     String    // paved, unpaved, dirt, gravel, etc.
+  difficulty       String    // easy, medium, hard, expert
+  popularity_score Float     // Score from 0.0 to 1.0 based on usage
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+  
+  // Geographic data using PostGIS geography type (SRID 4326)
+  // Stores the segment geometry as a LineString
+  geometry         Unsupported("geography(LineString, 4326)") @db.Postgis
+  
+  // Indexes for geographic and performance queries
+  @@index([osm_id])
+  @@index([surface_type])
+  @@index([difficulty])
+  @@index([popularity_score])
+  @@map("segments")
 }
 
+// Review model for user reviews of routes
 model Review {
-  id        String   @id @default(cuid())
-  rating    Int      @db.SmallInt
-  comment   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  id         String   @id @default(cuid())
+  user_id    String
+  route_id   String
+  rating     Int      @db.SmallInt // Rating from 1 to 5
+  comment    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  
   // Relations
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trailId String?
-  trail   Trail? @relation(fields: [trailId], references: [id], onDelete: Cascade)
-  routeId String?
-  route   Route? @relation(fields: [routeId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, trailId])
-  @@unique([userId, routeId])
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  route      Route    @relation(fields: [route_id], references: [id], onDelete: Cascade)
+  
+  // Ensure one review per user per route
+  @@unique([user_id, route_id])
+  @@index([route_id])
+  @@index([rating])
+  @@index([created_at])
   @@map("reviews")
 }
 
-enum Difficulty {
-  EASY
-  MEDIUM
-  HARD
-  EXPERT
-}
-
-enum WaypointType {
-  START
-  END
-  WAYPOINT
-}
+// Geographic data structure explanation:
+// 
+// PostGIS Geography Type (SRID 4326):
+// - Uses WGS84 coordinate system (latitude/longitude)
+// - Geography type provides accurate distance calculations on Earth's surface
+// - LineString stores ordered sequence of coordinate pairs
+// - Coordinates are stored as [longitude, latitude] (GeoJSON format)
+//
+// Example geometry data:
+// {
+//   "type": "LineString",
+//   "coordinates": [
+//     [2.3522, 48.8566],  // [longitude, latitude] - Paris
+//     [2.2945, 48.8584], // [longitude, latitude] - Eiffel Tower
+//     [2.3200, 48.8700]  // [longitude, latitude] - Another point
+//   ]
+// }
+//
+// Geographic queries supported:
+// - Distance calculations: ST_Distance(geometry1, geometry2)
+// - Bounding box queries: ST_Contains(bounding_box, point)
+// - Proximity searches: ST_DWithin(geometry, point, distance)
+// - Spatial joins: ST_Intersects(geometry1, geometry2)
+//
+// Performance considerations:
+// - Spatial indexes are automatically created on geometry columns
+// - Use ST_GeomFromText() for coordinate transformations
+// - Consider using ST_Transform() for different coordinate systems
