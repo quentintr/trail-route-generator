@@ -40,3 +40,5 @@ SELECT
         THEN 'Available' 
         ELSE 'Not Found' 
     END as status;
+
+

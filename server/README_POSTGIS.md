@@ -242,3 +242,5 @@ TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/trail_route_generator_t
 ✅ **Prêt pour le développement**
 
 La configuration PostGIS est maintenant prête pour le développement de l'application Trail Route Generator ! 🚀
+
+

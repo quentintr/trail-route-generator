@@ -75,3 +75,5 @@ SELECT 'PostGIS Test Summary' as summary;
 SELECT 
     'All tests completed successfully' as status,
     NOW() as test_timestamp;
+
+
