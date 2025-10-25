@@ -1,6 +1,7 @@
 import express from 'express'
 import { z } from 'zod'
 import { PrismaClient } from '@prisma/client'
+import { routingService } from '../services'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -25,6 +26,14 @@ const createRouteSchema = z.object({
 })
 
 const updateRouteSchema = createRouteSchema.partial()
+
+// Calculate route between two points
+const calculateRouteSchema = z.object({
+  start: z.array(z.number()).length(2, 'Point de départ requis [longitude, latitude]'),
+  end: z.array(z.number()).length(2, 'Point d\'arrivée requis [longitude, latitude]'),
+  profile: z.enum(['foot', 'bike']).optional().default('foot'),
+  alternatives: z.boolean().optional().default(false)
+})
 
 // Get all routes
 router.get('/', async (req, res) => {
