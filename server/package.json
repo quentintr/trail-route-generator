@@ -14,6 +14,7 @@
     "db:init-postgis": "psql $DATABASE_URL -f scripts/init-postgis.sql",
     "db:test-postgis": "psql $DATABASE_URL -f scripts/test-postgis.sql",
     "demo:geographic": "tsx src/demo/geographic-demo.ts",
+    "test:mapping": "tsx src/scripts/test-mapping-services.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
