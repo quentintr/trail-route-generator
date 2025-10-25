@@ -301,12 +301,4 @@ export async function demonstrateMappingServices() {
   }
 }
 
-// Export des fonctions d'exemple
-export {
-  findTrailsNearLocation,
-  calculateRouteBetweenPoints,
-  findPointsOfInterest,
-  calculateDistanceMatrix,
-  createCompleteHikingRoute,
-  demonstrateMappingServices
-}
+// Les fonctions sont déjà exportées individuellement ci-dessus
