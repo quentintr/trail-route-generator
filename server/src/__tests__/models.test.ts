@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
-import { connectDatabase, disconnectDatabase } from '../db.js'
 
 describe('Database Models with PostGIS', () => {
   let prisma: PrismaClient
   let testUserId: string
 
   beforeAll(async () => {
-    prisma = await connectDatabase()
+    prisma = new PrismaClient()
+    await prisma.$connect()
   })
 
   afterAll(async () => {
-    await disconnectDatabase(prisma)
+    await prisma.$disconnect()
   })
 
   beforeEach(async () => {

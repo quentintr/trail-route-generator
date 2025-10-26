@@ -5,10 +5,15 @@ import morgan from 'morgan'
 import dotenv from 'dotenv'
 import { connectDatabase, getDatabase, healthCheck } from './db'
 
+// Import middleware
+import { errorHandler, notFoundHandler } from './middleware/error-handler'
+import { generalLimiter, routeGenerationLimiter, authLimiter, routeSaveLimiter } from './middleware/rate-limiter'
+
 // Import routes
 import authRoutes from './routes/auth'
 import trailRoutes from './routes/trails'
 import routeRoutes from './routes/routes'
+import apiV1Routes from './routes/api/v1/routes'
 
 // Load environment variables
 dotenv.config()
@@ -16,15 +21,35 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 5000
 
-// Middleware
-app.use(helmet())
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}))
+
+// CORS configuration
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'user-id']
 }))
-app.use(morgan('combined'))
+
+// Logging
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'))
+
+// Body parsing
 app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true }))
+app.use(express.urlencoded({ extended: true, limit: '10mb' }))
+
+// Rate limiting
+app.use(generalLimiter)
 
 // Health check with PostGIS status
 app.get('/health', async (req, res) => {
@@ -43,30 +68,27 @@ app.get('/health', async (req, res) => {
   }
 })
 
-// API Routes
-app.use('/api/auth', authRoutes)
+// API Routes with rate limiting
+app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/trails', trailRoutes)
 app.use('/api/routes', routeRoutes)
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.originalUrl 
-  })
-})
+// API v1 routes with specific rate limiting
+app.use('/api/v1/routes', (req, res, next) => {
+  if (req.method === 'POST' && req.path === '/generate') {
+    return routeGenerationLimiter(req, res, next)
+  }
+  if (req.method === 'POST' && req.path.includes('/save')) {
+    return routeSaveLimiter(req, res, next)
+  }
+  next()
+}, apiV1Routes)
 
-// Error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err)
-  
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-  })
-})
+// 404 handler
+app.use(notFoundHandler)
+
+// Global error handler
+app.use(errorHandler)
 
 // Start server with database connection
 const startServer = async () => {

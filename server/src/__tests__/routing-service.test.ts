@@ -10,7 +10,8 @@ import { RoutingService, routingUtils } from '../services/routing-service'
 
 // Mock axios pour éviter les appels réseau réels
 jest.mock('axios')
-const mockedAxios = jest.mocked(await import('axios'))
+import axios from 'axios'
+const mockedAxios = jest.mocked(axios)
 
 describe('RoutingService', () => {
   let routingService: RoutingService

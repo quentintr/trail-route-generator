@@ -11,7 +11,8 @@ import { configUtils } from '../config/osm-config'
 
 // Mock axios pour éviter les appels réseau réels
 jest.mock('axios')
-const mockedAxios = jest.mocked(await import('axios'))
+import axios from 'axios'
+const mockedAxios = jest.mocked(axios)
 
 describe('OSMService', () => {
   let osmService: OSMService
