@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals'
 import { PrismaClient } from '@prisma/client'
-import { connectDatabase, disconnectDatabase } from '../db.js'
+import { connectDatabase, disconnectDatabase } from '../db'
 
 describe('Database Configuration with PostGIS', () => {
   let prisma: PrismaClient

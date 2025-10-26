@@ -40,9 +40,9 @@ model Route {
   created_at     DateTime  @default(now())
   updated_at     DateTime  @updatedAt
   
-  // Geographic data using PostGIS geography type (SRID 4326)
-  // Stores the complete route geometry as a LineString
-  geometry       Unsupported("geography(LineString, 4326)")
+  // Geographic data stored as JSONB for flexibility
+  // Stores the complete route geometry as GeoJSON LineString
+  geometry       Json?     // GeoJSON LineString format
   
   // Relations
   user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -67,9 +67,9 @@ model Segment {
   created_at       DateTime  @default(now())
   updated_at       DateTime  @updatedAt
   
-  // Geographic data using PostGIS geography type (SRID 4326)
-  // Stores the segment geometry as a LineString
-  geometry         Unsupported("geography(LineString, 4326)")
+  // Geographic data stored as JSONB for flexibility
+  // Stores the segment geometry as GeoJSON LineString
+  geometry         Json?     // GeoJSON LineString format
   
   // Indexes for geographic and performance queries
   @@index([osm_id])
