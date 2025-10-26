@@ -1,30 +1,10 @@
 import express from 'express'
-import { z } from 'zod'
 import { AuthService } from '../../../services/auth-service'
 import { asyncHandler } from '../../../middleware/error-handler'
+import { registerSchema, loginSchema, refreshTokenSchema } from '../../../middleware/validation'
 
 const router = express.Router()
 const authService = new AuthService()
-
-// Validation schemas
-const registerSchema = z.object({
-  email: z.string().email('Invalid email format'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  name: z.string().min(2, 'Name must be at least 2 characters')
-})
-
-const loginSchema = z.object({
-  email: z.string().email('Invalid email format'),
-  password: z.string().min(1, 'Password is required')
-})
-
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1, 'Refresh token is required')
-})
-
-const logoutSchema = z.object({
-  refreshToken: z.string().min(1, 'Refresh token is required')
-})
 
 /**
  * @swagger
@@ -198,7 +178,7 @@ router.post('/login', asyncHandler(async (req, res) => {
  *         description: Server error
  */
 router.post('/refresh', asyncHandler(async (req, res) => {
-  const { refreshToken } = refreshSchema.parse(req.body)
+  const { refreshToken } = refreshTokenSchema.parse(req.body)
   
   const tokens = await authService.refreshToken(refreshToken)
   
@@ -246,7 +226,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
  *         description: Server error
  */
 router.post('/logout', asyncHandler(async (req, res) => {
-  const { refreshToken } = logoutSchema.parse(req.body)
+  const { refreshToken } = refreshTokenSchema.parse(req.body)
   
   const result = await authService.logout(refreshToken)
   

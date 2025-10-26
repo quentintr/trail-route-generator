@@ -1,24 +1,31 @@
-import { Routes, Route } from 'react-router-dom'
-import { Layout } from '@/components/Layout'
-import { Home } from '@/pages/Home'
-import { Trails } from '@/pages/Trails'
-import { RouteGenerator } from '@/pages/RouteGenerator'
-import { Profile } from '@/pages/Profile'
-import { Login } from '@/pages/Login'
-import { Register } from '@/pages/Register'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { Layout } from './components/layout/Layout'
+import { Home } from './pages/Home'
+import { Login } from './pages/Login'
+import { Register } from './pages/Register'
+import { MyRoutes } from './pages/MyRoutes'
+import { RouteDetails } from './pages/RouteDetails'
 
 function App() {
   return (
-    <Layout>
+    <Router>
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/trails" element={<Trails />} />
-        <Route path="/generator" element={<RouteGenerator />} />
-        <Route path="/profile" element={<Profile />} />
+        {/* Public routes with layout */}
+        <Route path="/" element={<Layout><Home /></Layout>} />
+        <Route path="/about" element={<Layout><div>À propos</div></Layout>} />
+        
+        {/* Auth routes without layout */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        
+        {/* Protected routes with layout */}
+        <Route path="/my-routes" element={<Layout><MyRoutes /></Layout>} />
+        <Route path="/routes/:id" element={<Layout><RouteDetails /></Layout>} />
+        
+        {/* 404 route */}
+        <Route path="*" element={<Layout><div>Page non trouvée</div></Layout>} />
       </Routes>
-    </Layout>
+    </Router>
   )
 }
 
