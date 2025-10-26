@@ -51,43 +51,50 @@ export class AuthService {
     // Validate input
     this.validateUserData(userData)
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: userData.email }
-    })
+    try {
+      // Check if user already exists
+      const existingUser = await prisma.user.findUnique({
+        where: { email: userData.email }
+      })
 
-    if (existingUser) {
-      throw new Error('User already exists')
-    }
-
-    // Hash password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(userData.password, saltRounds)
-
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email: userData.email,
-        password_hash: hashedPassword,
-        name: userData.name,
-        preferences: {}
+      if (existingUser) {
+        throw new Error('User already exists')
       }
-    })
 
-    // Generate tokens
-    const tokens = this.generateTokens({
-      userId: user.id,
-      email: user.email
-    })
+      // Hash password
+      const saltRounds = 12
+      const hashedPassword = await bcrypt.hash(userData.password, saltRounds)
 
-    return {
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name
-      },
-      tokens
+      // Create user
+      const user = await prisma.user.create({
+        data: {
+          email: userData.email,
+          password_hash: hashedPassword,
+          name: userData.name,
+          preferences: {}
+        }
+      })
+
+      // Generate tokens
+      const tokens = this.generateTokens({
+        userId: user.id,
+        email: user.email
+      })
+
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name
+        },
+        tokens
+      }
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        throw new Error('User already exists')
+      }
+      throw error
     }
   }
 
@@ -220,10 +227,11 @@ export class AuthService {
   }
 
   generateToken(payload: TokenPayload, expiresIn: string): string {
-    // Add timestamp to payload to ensure different tokens
+    // Add timestamp and random value to payload to ensure different tokens
     const payloadWithTimestamp = {
       ...payload,
-      iat: Math.floor(Date.now() / 1000)
+      iat: Math.floor(Date.now() / 1000),
+      jti: Math.random().toString(36).substring(2, 15) // Random JWT ID
     }
     return jwt.sign(payloadWithTimestamp, this.JWT_SECRET, { expiresIn })
   }

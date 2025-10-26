@@ -1,125 +1,117 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { LogIn, Mail, Lock } from 'lucide-react'
-import { useAuthStore } from '@/stores/authStore'
+import { Link, useNavigate } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
+import { LoginRequest } from '../types/route'
 
 export const Login = () => {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const { login } = useAuthStore()
+  const [formData, setFormData] = useState<LoginRequest>({
+    email: '',
+    password: '',
+  })
+  const { login, isLoading, error } = useAuth()
+  const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
     
     try {
-      await login(email, password)
-    } catch (error) {
-      console.error('Erreur de connexion:', error)
-    } finally {
-      setIsLoading(false)
+      await login(formData)
+      navigate('/')
+    } catch (err) {
+      // Error is handled by the auth store
     }
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <LogIn className="h-12 w-12 text-primary-600" />
-        </div>
-        <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-          Connexion à votre compte
-        </h2>
-        <p className="mt-2 text-center text-sm text-gray-600">
-          Ou{' '}
-          <Link
-            to="/register"
-            className="font-medium text-primary-600 hover:text-primary-500"
-          >
-            créez un nouveau compte
-          </Link>
-        </p>
-      </div>
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }))
+  }
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="card">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <div className="mx-auto h-12 w-12 bg-green-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-xl">C</span>
+          </div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            Se connecter à votre compte
+          </h2>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Ou{' '}
+            <Link
+              to="/register"
+              className="font-medium text-green-600 hover:text-green-500"
+            >
+              créez un nouveau compte
+            </Link>
+          </p>
+        </div>
+
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                 Adresse email
               </label>
-              <div className="mt-1 relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="input pl-10"
-                  placeholder="votre@email.com"
-                />
-              </div>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={formData.email}
+                onChange={handleChange}
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-green-500 focus:border-green-500 focus:z-10 sm:text-sm"
+                placeholder="votre@email.com"
+              />
             </div>
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Mot de passe
               </label>
-              <div className="mt-1 relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="input pl-10"
-                  placeholder="••••••••"
-                />
-              </div>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={formData.password}
+                onChange={handleChange}
+                className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-green-500 focus:border-green-500 focus:z-10 sm:text-sm"
+                placeholder="Votre mot de passe"
+              />
             </div>
+          </div>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <input
-                  id="remember-me"
-                  name="remember-me"
-                  type="checkbox"
-                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                />
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                  Se souvenir de moi
-                </label>
-              </div>
-
-              <div className="text-sm">
-                <a href="#" className="font-medium text-primary-600 hover:text-primary-500">
-                  Mot de passe oublié ?
-                </a>
-              </div>
+          {error && (
+            <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded-md">
+              {error}
             </div>
+          )}
 
-            <div>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="btn btn-primary w-full flex justify-center items-center"
-              >
-                {isLoading ? (
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                ) : (
-                  'Se connecter'
-                )}
-              </button>
-            </div>
-          </form>
-        </div>
+          <div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:bg-gray-400"
+            >
+              {isLoading ? 'Connexion...' : 'Se connecter'}
+            </button>
+          </div>
+
+          <div className="text-center">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-green-600 hover:text-green-500"
+            >
+              Mot de passe oublié ?
+            </Link>
+          </div>
+        </form>
       </div>
     </div>
   )

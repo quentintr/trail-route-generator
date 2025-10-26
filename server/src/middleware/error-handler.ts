@@ -51,7 +51,7 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
   }
 
   // Authentication errors
-  if (err.message === 'Not authenticated') {
+  if (err.message === 'Not authenticated' || err.message === 'Authentication required') {
     return res.status(401).json({ 
       success: false,
       message: 'Authentication required' 
@@ -62,6 +62,49 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
     return res.status(403).json({ 
       success: false,
       message: 'Not authorized to perform this action' 
+    })
+  }
+
+  // Auth service specific errors
+  if (err.message === 'Invalid credentials') {
+    return res.status(401).json({ 
+      success: false,
+      message: 'Invalid credentials' 
+    })
+  }
+
+  if (err.message === 'User already exists') {
+    return res.status(409).json({ 
+      success: false,
+      message: 'User already exists' 
+    })
+  }
+
+  if (err.message === 'User not found') {
+    return res.status(401).json({ 
+      success: false,
+      message: 'Invalid credentials' 
+    })
+  }
+
+  if (err.message === 'Invalid refresh token' || err.message === 'Refresh token expired') {
+    return res.status(401).json({ 
+      success: false,
+      message: 'Invalid refresh token' 
+    })
+  }
+
+  if (err.message === 'Token expired') {
+    return res.status(401).json({ 
+      success: false,
+      message: 'Token expired' 
+    })
+  }
+
+  if (err.message === 'Invalid token') {
+    return res.status(401).json({ 
+      success: false,
+      message: 'Invalid token' 
     })
   }
 

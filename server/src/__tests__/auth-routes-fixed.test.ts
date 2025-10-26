@@ -10,18 +10,18 @@ const prisma = new PrismaClient()
 // Create test app without starting server
 const createTestApp = () => {
   const app = express()
-  
+
   // Middleware
   app.use(express.json())
   app.use(express.urlencoded({ extended: true }))
-  
+
   // Routes
   app.use('/api/v1/auth', authRoutes)
-  
+
   // Error handling
   app.use(notFoundHandler)
   app.use(errorHandler)
-  
+
   return app
 }
 
@@ -44,7 +44,7 @@ describe('Auth Routes', () => {
   describe('POST /api/v1/auth/register', () => {
     it('should register a new user successfully', async () => {
       const userData = {
-        email: 'test@example.com',
+        email: 'test1@example.com',
         password: 'password123',
         name: 'Test User'
       }
@@ -79,7 +79,7 @@ describe('Auth Routes', () => {
 
     it('should return 400 for weak password', async () => {
       const userData = {
-        email: 'test@example.com',
+        email: 'test2@example.com',
         password: '123',
         name: 'Test User'
       }
@@ -92,7 +92,7 @@ describe('Auth Routes', () => {
 
     it('should return 400 for missing required fields', async () => {
       const userData = {
-        email: 'test@example.com'
+        email: 'test3@example.com'
         // Missing password and name
       }
 
@@ -104,18 +104,18 @@ describe('Auth Routes', () => {
 
     it('should return 409 for duplicate email', async () => {
       const userData = {
-        email: 'test@example.com',
+        email: 'test4@example.com',
         password: 'password123',
         name: 'Test User'
       }
 
-      // Register first user
+      // Register first time
       await request(app)
         .post('/api/v1/auth/register')
         .send(userData)
         .expect(201)
 
-      // Try to register with same email
+      // Try to register again with same email
       await request(app)
         .post('/api/v1/auth/register')
         .send(userData)
@@ -125,9 +125,9 @@ describe('Auth Routes', () => {
 
   describe('POST /api/v1/auth/login', () => {
     beforeEach(async () => {
-      // Register a test user
+      // Register a user for login tests
       const userData = {
-        email: 'test@example.com',
+        email: 'test5@example.com',
         password: 'password123',
         name: 'Test User'
       }
@@ -139,7 +139,7 @@ describe('Auth Routes', () => {
 
     it('should login with valid credentials', async () => {
       const loginData = {
-        email: 'test@example.com',
+        email: 'test5@example.com',
         password: 'password123'
       }
 
@@ -170,7 +170,7 @@ describe('Auth Routes', () => {
 
     it('should return 401 for invalid password', async () => {
       const loginData = {
-        email: 'test@example.com',
+        email: 'test5@example.com',
         password: 'wrongpassword'
       }
 
@@ -182,7 +182,7 @@ describe('Auth Routes', () => {
 
     it('should return 400 for missing credentials', async () => {
       const loginData = {
-        email: 'test@example.com'
+        email: 'test5@example.com'
         // Missing password
       }
 
@@ -202,7 +202,7 @@ describe('Auth Routes', () => {
       
       // Register and login to get tokens
       const userData = {
-        email: 'test@example.com',
+        email: 'test6@example.com',
         password: 'password123',
         name: 'Test User'
       }
@@ -214,7 +214,7 @@ describe('Auth Routes', () => {
       const loginResponse = await request(app)
         .post('/api/v1/auth/login')
         .send({
-          email: 'test@example.com',
+          email: 'test6@example.com',
           password: 'password123'
         })
 
@@ -252,9 +252,12 @@ describe('Auth Routes', () => {
     let refreshToken: string
 
     beforeEach(async () => {
+      // Clean up any existing users first
+      await prisma.user.deleteMany()
+      
       // Register and login to get tokens
       const userData = {
-        email: 'test@example.com',
+        email: 'test7@example.com',
         password: 'password123',
         name: 'Test User'
       }
@@ -266,7 +269,7 @@ describe('Auth Routes', () => {
       const loginResponse = await request(app)
         .post('/api/v1/auth/login')
         .send({
-          email: 'test@example.com',
+          email: 'test7@example.com',
           password: 'password123'
         })
 
@@ -280,6 +283,7 @@ describe('Auth Routes', () => {
         .expect(200)
 
       expect(response.body.success).toBe(true)
+      expect(response.body.message).toBe('Logged out successfully')
     })
 
     it('should return 401 for invalid refresh token', async () => {
