@@ -15,6 +15,7 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   password_hash String    // Hashed password using bcrypt
+  name          String
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
   
@@ -31,12 +32,14 @@ model User {
 // Route model for user-generated trail routes
 model Route {
   id             String    @id @default(cuid())
-  user_id        String
+  userId         String
   name           String
+  description    String?
   distance       Float     // Distance in kilometers
-  elevation_gain Float     // Total elevation gain in meters
   duration       Int       // Duration in minutes
-  terrain_type   String    // mountain, forest, coastal, urban, etc.
+  elevation      Float     // Total elevation gain in meters
+  difficulty     String    // easy, medium, hard, expert
+  terrain_type   String    // paved, unpaved, mixed
   created_at     DateTime  @default(now())
   updated_at     DateTime  @updatedAt
   
@@ -45,15 +48,34 @@ model Route {
   geometry       Json?     // GeoJSON LineString format
   
   // Relations
-  user           User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   reviews        Review[]
+  waypoints      Waypoint[]
   
   // Indexes for geographic queries
-  @@index([user_id])
+  @@index([userId])
   @@index([terrain_type])
+  @@index([difficulty])
   @@index([distance])
   @@index([created_at])
   @@map("routes")
+}
+
+// Waypoint model for route waypoints
+model Waypoint {
+  id        String   @id @default(cuid())
+  routeId   String
+  name      String?
+  latitude  Float
+  longitude Float
+  order     Int      // Order in the route
+  created_at DateTime @default(now())
+  
+  // Relations
+  route     Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  @@index([routeId])
+  @@map("waypoints")
 }
 
 // Segment model for popular route segments from OpenStreetMap
@@ -82,20 +104,20 @@ model Segment {
 // Review model for user reviews of routes
 model Review {
   id         String   @id @default(cuid())
-  user_id    String
-  route_id   String
+  userId     String
+  routeId    String
   rating     Int      @db.SmallInt // Rating from 1 to 5
   comment    String?
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   
   // Relations
-  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  route      Route    @relation(fields: [route_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route      Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
   
   // Ensure one review per user per route
-  @@unique([user_id, route_id])
-  @@index([route_id])
+  @@unique([userId, routeId])
+  @@index([routeId])
   @@index([rating])
   @@index([created_at])
   @@map("reviews")
