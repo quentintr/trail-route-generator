@@ -2,19 +2,36 @@
 # Utilise Node.js 18 Alpine pour un environnement léger et sécurisé
 FROM node:18-alpine
 
+# Installe OpenSSL pour Prisma
+RUN apk add --no-cache openssl
+
 # Définit le répertoire de travail dans le conteneur
 WORKDIR /app
 
-# Copie les fichiers package.json et package-lock.json
-# Cela permet de mettre en cache les dépendances si ces fichiers n'ont pas changé
+# Copie les fichiers package.json et package-lock.json à la racine
 COPY package*.json ./
 
-# Installe toutes les dépendances npm
-# --frozen-lockfile garantit que package-lock.json est utilisé exactement
-RUN npm ci --frozen-lockfile
+# Copie les fichiers package.json des sous-projets
+COPY server/package*.json ./server/
+COPY shared/package*.json ./shared/
 
-# Copie tout le code source du serveur
-# L'ordre est important : d'abord les dépendances, puis le code source
+# Installe les dépendances à la racine
+RUN npm install
+
+# Installe les dépendances du serveur
+WORKDIR /app/server
+RUN npm install
+
+# Copie le schéma Prisma pour générer le client
+COPY server/prisma/ ./prisma/
+
+# Génère le client Prisma
+RUN npx prisma generate
+
+# Retourne à la racine
+WORKDIR /app
+
+# Copie tout le code source
 COPY server/ ./server/
 COPY shared/ ./shared/
 

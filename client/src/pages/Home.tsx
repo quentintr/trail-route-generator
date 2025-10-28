@@ -1,239 +1,73 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useRoutesStore } from '../store/routes-store'
-import { RouteGenerationRequest } from '../types/route'
+import { Link } from 'react-router-dom'
+import { SearchForm } from '../components/search/SearchForm'
 
-export const Home = () => {
-  const [searchParams, setSearchParams] = useState<RouteGenerationRequest>({
-    start_lat: 0,
-    start_lon: 0,
-    distance: 5,
-    difficulty: 'medium',
-    terrain_type: 'mixed',
-  })
-  const [isSearching, setIsSearching] = useState(false)
-  const { generateRoutes, isLoading, error } = useRoutesStore()
-  const navigate = useNavigate()
-
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!searchParams.start_lat || !searchParams.start_lon) {
-      alert('Veuillez entrer des coordonnées valides')
-      return
-    }
-
-    setIsSearching(true)
-    try {
-      await generateRoutes(searchParams)
-      navigate('/search-results')
-    } catch (err) {
-      console.error('Search error:', err)
-    } finally {
-      setIsSearching(false)
-    }
-  }
-
-  const handleLocationClick = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setSearchParams(prev => ({
-            ...prev,
-            start_lat: position.coords.latitude,
-            start_lon: position.coords.longitude,
-          }))
-        },
-        (error) => {
-          console.error('Geolocation error:', error)
-          alert('Impossible d\'obtenir votre position. Veuillez entrer les coordonnées manuellement.')
-        }
-      )
-    } else {
-      alert('La géolocalisation n\'est pas supportée par votre navigateur.')
-    }
-  }
-
+const Home = () => {
   return (
-    <div className="bg-gradient-to-br from-green-50 to-blue-50 min-h-screen">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
       {/* Hero Section */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-            Découvrez vos
-            <span className="text-green-600"> prochains itinéraires</span>
-          </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Générez des itinéraires de randonnée personnalisés près de chez vous. 
-            Notre algorithme utilise des données OpenStreetMap pour vous proposer 
-            les meilleurs parcours selon vos préférences.
-          </p>
-        </div>
-
-        {/* Search Form */}
-        <div className="max-w-2xl mx-auto">
-          <form onSubmit={handleSearch} className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-6 text-center">
-              Rechercher un itinéraire
-            </h2>
-
-            <div className="space-y-4">
-              {/* Location Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Position de départ
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Latitude"
-                      value={searchParams.start_lat || ''}
-                      onChange={(e) => setSearchParams(prev => ({
-                        ...prev,
-                        start_lat: parseFloat(e.target.value) || 0
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
+      <div className="relative overflow-hidden">
+        <div className="max-w-7xl mx-auto">
+          <div className="relative z-10 pb-8 sm:pb-16 md:pb-20 lg:max-w-2xl lg:w-full lg:pb-28 xl:pb-32">
+            <main className="mt-10 mx-auto max-w-7xl px-4 sm:mt-12 sm:px-6 md:mt-16 lg:mt-20 lg:px-8 xl:mt-28">
+              <div className="sm:text-center lg:text-left">
+                <h1 className="text-4xl tracking-tight font-extrabold text-gray-900 sm:text-5xl md:text-6xl">
+                  <span className="block xl:inline">Discover amazing</span>{' '}
+                  <span className="block text-indigo-600 xl:inline">trail routes</span>
+                </h1>
+                <p className="mt-3 text-base text-gray-500 sm:mt-5 sm:text-lg sm:max-w-xl sm:mx-auto md:mt-5 md:text-xl lg:mx-0">
+                  Generate personalized running and hiking routes based on your preferences. 
+                  Find the perfect path for your next adventure with our AI-powered route generator.
+                </p>
+                <div className="mt-5 sm:mt-8 sm:flex sm:justify-center lg:justify-start">
+                  <div className="rounded-md shadow">
+                    <Link
+                      to="#search"
+                      className="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 md:py-4 md:text-lg md:px-10 transition-all duration-200 transform hover:scale-105"
+                    >
+                      Start Exploring
+                    </Link>
                   </div>
-                  <div>
-                    <input
-                      type="number"
-                      step="any"
-                      placeholder="Longitude"
-                      value={searchParams.start_lon || ''}
-                      onChange={(e) => setSearchParams(prev => ({
-                        ...prev,
-                        start_lon: parseFloat(e.target.value) || 0
-                      }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                    />
+                  <div className="mt-3 sm:mt-0 sm:ml-3">
+                    <Link
+                      to="/trails"
+                      className="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 md:py-4 md:text-lg md:px-10 transition-all duration-200"
+                    >
+                      Browse Trails
+                    </Link>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLocationClick}
-                  className="mt-2 text-sm text-green-600 hover:text-green-700 font-medium"
-                >
-                  📍 Utiliser ma position actuelle
-                </button>
               </div>
-
-              {/* Distance */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Distance (km)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={searchParams.distance || 5}
-                  onChange={(e) => setSearchParams(prev => ({
-                    ...prev,
-                    distance: parseInt(e.target.value) || 5
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                />
-              </div>
-
-              {/* Difficulty */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Difficulté
-                </label>
-                <select
-                  value={searchParams.difficulty || 'medium'}
-                  onChange={(e) => setSearchParams(prev => ({
-                    ...prev,
-                    difficulty: e.target.value as 'easy' | 'medium' | 'hard' | 'expert'
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="easy">Facile</option>
-                  <option value="medium">Moyen</option>
-                  <option value="hard">Difficile</option>
-                  <option value="expert">Expert</option>
-                </select>
-              </div>
-
-              {/* Terrain Type */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Type de terrain
-                </label>
-                <select
-                  value={searchParams.terrain_type || 'mixed'}
-                  onChange={(e) => setSearchParams(prev => ({
-                    ...prev,
-                    terrain_type: e.target.value as 'paved' | 'unpaved' | 'mixed'
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="mixed">Mixte</option>
-                  <option value="paved">Goudronné</option>
-                  <option value="unpaved">Non goudronné</option>
-                </select>
-              </div>
-
-              {/* Search Button */}
-              <button
-                type="submit"
-                disabled={isLoading || isSearching}
-                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium py-3 px-4 rounded-md transition-colors"
-              >
-                {isLoading || isSearching ? 'Recherche en cours...' : 'Générer des itinéraires'}
-              </button>
-            </div>
-
-            {error && (
-              <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md">
-                {error}
-              </div>
-            )}
-          </form>
+            </main>
+          </div>
         </div>
+      </div>
 
-        {/* Features */}
-        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
+      {/* Search Section */}
+      <div id="search" className="py-16 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-2xl">🗺️</span>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              Données OpenStreetMap
-            </h3>
-            <p className="text-gray-600">
-              Utilise des données cartographiques libres et à jour pour générer des itinéraires précis.
+            <h2 className="text-3xl font-extrabold text-gray-900 sm:text-4xl">
+              Generate Your Perfect Route
+            </h2>
+            <p className="mt-4 text-lg text-gray-600">
+              Tell us your preferences and we'll create amazing routes just for you
             </p>
           </div>
 
-          <div className="text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-2xl">⚡</span>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              Algorithme intelligent
-            </h3>
-            <p className="text-gray-600">
-              Notre algorithme optimise les itinéraires selon vos préférences et les conditions du terrain.
-            </p>
-          </div>
-
-          <div className="text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-2xl">🎯</span>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              Personnalisation
-            </h3>
-            <p className="text-gray-600">
-              Adapte les itinéraires à votre niveau de difficulté et vos préférences de terrain.
-            </p>
-          </div>
+                 <div className="mt-12">
+                   <div className="max-w-2xl mx-auto">
+                     <div className="bg-white shadow-xl rounded-2xl p-8">
+                       <h3 className="text-xl font-semibold text-gray-900 mb-6 text-center">
+                         Route Generator
+                       </h3>
+                       <SearchForm />
+                     </div>
+                   </div>
+                 </div>
         </div>
       </div>
     </div>
   )
 }
+
+export default Home

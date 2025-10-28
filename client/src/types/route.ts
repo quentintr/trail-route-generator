@@ -41,6 +41,7 @@ export interface RouteGenerationRequest {
   difficulty?: 'easy' | 'medium' | 'hard' | 'expert'
   terrain_type?: 'paved' | 'unpaved' | 'mixed'
   elevation_gain?: number
+  pace?: number // Pace in minutes per km
 }
 
 export interface RouteGenerationResponse {
