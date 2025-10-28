@@ -5,17 +5,28 @@ FROM node:18-alpine
 # Définit le répertoire de travail dans le conteneur
 WORKDIR /app
 
-# Copie les fichiers package.json et package-lock.json
-# Cela permet de mettre en cache les dépendances si ces fichiers n'ont pas changé
+# Copie les fichiers package.json et package-lock.json à la racine
 COPY package*.json ./
 
-# Installe toutes les dépendances npm
-# --frozen-lockfile garantit que package-lock.json est utilisé exactement
-RUN npm ci --frozen-lockfile
+# Copie les fichiers package.json du client
+COPY client/package*.json ./client/
 
-# Copie tout le code source du client
-# L'ordre est important : d'abord les dépendances, puis le code source
+# Copie les fichiers package.json du shared
+COPY shared/package*.json ./shared/
+
+# Installe les dépendances à la racine
+RUN npm install
+
+# Installe les dépendances du client
+WORKDIR /app/client
+RUN npm install
+
+# Retourne à la racine
+WORKDIR /app
+
+# Copie tout le code source du client et shared
 COPY client/ ./client/
+COPY shared/ ./shared/
 
 # Expose le port 5173 pour le serveur de développement Vite
 # Vite utilise le port 5173 par défaut pour le hot reload

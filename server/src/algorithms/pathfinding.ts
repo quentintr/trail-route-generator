@@ -1,15 +1,39 @@
 /**
- * Pathfinding Algorithms for Loop Generation
+ * Algorithmes de recherche de chemin (Pathfinding)
  * 
- * Implements Dijkstra's algorithm and A* algorithm for efficient pathfinding
- * in weighted graphs with custom weight functions.
+ * Ce module implémente les algorithmes de recherche de chemin optimisés
+ * pour la génération de boucles de randonnée/course.
+ * 
+ * Algorithmes implémentés :
+ * - Dijkstra avec file de priorité
+ * - A* avec fonction heuristique
+ * - Support de fonctions de poids personnalisées
  */
 
-import { WeightedGraph, GraphNode, GraphEdge } from '../services/graph-builder'
-import { haversineDistance } from '../utils/geo-utils'
+import { Graph, GraphNode, GraphEdge } from '../services/graph-builder'
+import { haversineDistance, calculateBearing } from '../utils/geo-utils'
 
 /**
- * Priority queue implementation for pathfinding algorithms
+ * Types pour les résultats de pathfinding
+ */
+export interface PathfindingResult {
+  path: string[] // IDs des nœuds du chemin
+  distance: number // Distance totale en mètres
+  weight: number // Poids total du chemin
+  nodes: GraphNode[] // Nœuds du chemin
+  edges: GraphEdge[] // Arêtes du chemin
+}
+
+export interface PathfindingOptions {
+  maxDistance?: number // Distance maximale à explorer
+  maxNodes?: number // Nombre maximal de nœuds à explorer
+  avoidEdges?: string[] // IDs des arêtes à éviter
+  preferEdges?: string[] // IDs des arêtes à privilégier
+  customWeightFunction?: (edge: GraphEdge, fromNode: GraphNode, toNode: GraphNode) => number
+}
+
+/**
+ * File de priorité simple pour Dijkstra/A*
  */
 class PriorityQueue<T> {
   private items: Array<{ item: T; priority: number }> = []
@@ -31,689 +55,564 @@ class PriorityQueue<T> {
   size(): number {
     return this.items.length
   }
-}
 
-/**
- * Pathfinding result
- */
-export interface PathfindingResult {
-  path: string[] // Node IDs
-  distance: number // Total distance in meters
-  weight: number // Total weight
-  found: boolean
-  explored: number // Number of nodes explored
-}
-
-/**
- * Custom weight function type
- */
-export type WeightFunction = (
-  edge: GraphEdge,
-  fromNode: GraphNode,
-  toNode: GraphNode,
-  currentPath: string[]
-) => number
-
-/**
- * Heuristic function type for A*
- */
-export type HeuristicFunction = (
-  fromNode: GraphNode,
-  toNode: GraphNode
-) => number
-
-/**
- * Pathfinding configuration
- */
-export interface PathfindingConfig {
-  maxDistance?: number // Maximum distance to search
-  maxNodes?: number // Maximum nodes to explore
-  avoidEdges?: Set<string> // Edge IDs to avoid
-  preferEdges?: Set<string> // Edge IDs to prefer
-  customWeight?: WeightFunction
-  customHeuristic?: HeuristicFunction
-}
-
-/**
- * Dijkstra's algorithm implementation
- */
-export class DijkstraPathfinder {
-  private graph: WeightedGraph
-  private config: PathfindingConfig
-
-  constructor(graph: WeightedGraph, config: PathfindingConfig = {}) {
-    this.graph = graph
-    this.config = config
+  clear(): void {
+    this.items = []
   }
+}
 
+/**
+ * Classe pour les algorithmes de pathfinding
+ */
+export class PathfindingAlgorithms {
   /**
-   * Find shortest path between two nodes
+   * Algorithme de Dijkstra avec file de priorité
+   * 
+   * @param graph Graphe à explorer
+   * @param startNodeId ID du nœud de départ
+   * @param endNodeId ID du nœud d'arrivée (optionnel pour exploration)
+   * @param options Options de recherche
+   * @returns Résultat du pathfinding
    */
-  findPath(startId: string, endId: string): PathfindingResult {
-    console.log(`🔍 Dijkstra: Finding path from ${startId} to ${endId}`)
+  dijkstra(
+    graph: Graph,
+    startNodeId: string,
+    endNodeId?: string,
+    options: PathfindingOptions = {}
+  ): PathfindingResult | null {
+    const startTime = Date.now()
     
+    // Vérifier que le nœud de départ existe
+    const startNode = graph.nodes.get(startNodeId)
+    if (!startNode) {
+      throw new Error(`Start node ${startNodeId} not found in graph`)
+    }
+
+    // Structures de données pour Dijkstra
     const distances = new Map<string, number>()
     const previous = new Map<string, string | null>()
     const visited = new Set<string>()
     const queue = new PriorityQueue<string>()
-    
-    // Initialize distances
-    for (const nodeId of this.graph.nodes.keys()) {
+
+    // Initialiser les distances
+    for (const nodeId of graph.nodes.keys()) {
       distances.set(nodeId, Infinity)
+      previous.set(nodeId, null)
     }
-    distances.set(startId, 0)
-    
-    queue.enqueue(startId, 0)
-    let explored = 0
-    
-    while (!queue.isEmpty() && explored < (this.config.maxNodes || 10000)) {
+    distances.set(startNodeId, 0)
+
+    // Ajouter le nœud de départ à la queue
+    queue.enqueue(startNodeId, 0)
+
+    let exploredNodes = 0
+    const maxNodes = options.maxNodes || 10000
+
+    // Algorithme de Dijkstra
+    while (!queue.isEmpty() && exploredNodes < maxNodes) {
       const currentNodeId = queue.dequeue()
       if (!currentNodeId) break
-      
-      if (visited.has(currentNodeId)) continue
-      visited.add(currentNodeId)
-      explored++
-      
-      // Check if we've reached the target
-      if (currentNodeId === endId) {
+
+      // Si on a atteint le nœud de destination, on peut s'arrêter
+      if (endNodeId && currentNodeId === endNodeId) {
         break
       }
-      
-      // Check distance limit
-      const currentDistance = distances.get(currentNodeId) || 0
-      if (this.config.maxDistance && currentDistance > this.config.maxDistance) {
+
+      if (visited.has(currentNodeId)) continue
+      visited.add(currentNodeId)
+      exploredNodes++
+
+      const currentNode = graph.nodes.get(currentNodeId)!
+      const currentDistance = distances.get(currentNodeId)!
+
+      // Vérifier la distance maximale
+      if (options.maxDistance && currentDistance > options.maxDistance) {
         continue
       }
-      
-      const currentNode = this.graph.nodes.get(currentNodeId)
-      if (!currentNode) continue
-      
-      // Explore neighbors
+
+      // Explorer les voisins
       for (const neighborId of currentNode.connections) {
         if (visited.has(neighborId)) continue
+
+        const edgeId = `${currentNodeId}-${neighborId}`
+        const reverseEdgeId = `${neighborId}-${currentNodeId}`
         
-        const edge = this.findEdge(currentNodeId, neighborId)
+        // Trouver l'arête (peut être dans les deux sens)
+        let edge = graph.edges.get(edgeId)
+        if (!edge) {
+          edge = graph.edges.get(reverseEdgeId)
+        }
+        
         if (!edge) continue
+
+        // Vérifier si cette arête doit être évitée
+        if (options.avoidEdges && options.avoidEdges.includes(edge.id)) {
+          continue
+        }
+
+        // Calculer le nouveau poids
+        let edgeWeight = edge.weight
         
-        // Calculate new distance
-        const edgeWeight = this.calculateEdgeWeight(edge, currentNode, this.graph.nodes.get(neighborId)!)
+        // Appliquer les préférences d'arêtes
+        if (options.preferEdges && options.preferEdges.includes(edge.id)) {
+          edgeWeight *= 0.5 // Réduire le poids de moitié
+        }
+
+        // Appliquer la fonction de poids personnalisée
+        if (options.customWeightFunction) {
+          const neighborNode = graph.nodes.get(neighborId)!
+          edgeWeight = options.customWeightFunction(edge, currentNode, neighborNode)
+        }
+
         const newDistance = currentDistance + edgeWeight
-        
-        const currentNeighborDistance = distances.get(neighborId) || Infinity
-        
-        if (newDistance < currentNeighborDistance) {
+        const existingDistance = distances.get(neighborId)!
+
+        if (newDistance < existingDistance) {
           distances.set(neighborId, newDistance)
           previous.set(neighborId, currentNodeId)
           queue.enqueue(neighborId, newDistance)
         }
       }
     }
+
+    // Si on cherche un chemin spécifique et qu'on ne l'a pas trouvé
+    if (endNodeId && !visited.has(endNodeId)) {
+      return null
+    }
+
+    // Reconstruire le chemin
+    const path = this.reconstructPath(previous, startNodeId, endNodeId)
+    if (!path || path.length === 0) {
+      return null
+    }
+
+    // Calculer les métriques du chemin
+    const result = this.calculatePathMetrics(graph, path)
     
-    // Reconstruct path
-    const path = this.reconstructPath(startId, endId, previous)
-    const totalDistance = this.calculatePathDistance(path)
-    const totalWeight = distances.get(endId) || Infinity
+    console.log(`Dijkstra completed: ${path.length} nodes, ${result.distance.toFixed(0)}m, ${Date.now() - startTime}ms`)
     
+    return result
+  }
+
+  /**
+   * Algorithme A* avec fonction heuristique
+   * 
+   * @param graph Graphe à explorer
+   * @param startNodeId ID du nœud de départ
+   * @param endNodeId ID du nœud d'arrivée
+   * @param options Options de recherche
+   * @returns Résultat du pathfinding
+   */
+  aStar(
+    graph: Graph,
+    startNodeId: string,
+    endNodeId: string,
+    options: PathfindingOptions = {}
+  ): PathfindingResult | null {
+    const startTime = Date.now()
+    
+    // Vérifier que les nœuds existent
+    const startNode = graph.nodes.get(startNodeId)
+    const endNode = graph.nodes.get(endNodeId)
+    
+    if (!startNode || !endNode) {
+      throw new Error('Start or end node not found in graph')
+    }
+
+    // Structures de données pour A*
+    const gScore = new Map<string, number>() // Coût réel du chemin
+    const fScore = new Map<string, number>() // Coût estimé total
+    const previous = new Map<string, string | null>()
+    const openSet = new PriorityQueue<string>()
+    const closedSet = new Set<string>()
+
+    // Initialiser les scores
+    for (const nodeId of graph.nodes.keys()) {
+      gScore.set(nodeId, Infinity)
+      fScore.set(nodeId, Infinity)
+      previous.set(nodeId, null)
+    }
+
+    gScore.set(startNodeId, 0)
+    fScore.set(startNodeId, this.heuristic(startNode, endNode))
+
+    openSet.enqueue(startNodeId, fScore.get(startNodeId)!)
+
+    let exploredNodes = 0
+    const maxNodes = options.maxNodes || 10000
+
+    // Algorithme A*
+    while (!openSet.isEmpty() && exploredNodes < maxNodes) {
+      const currentNodeId = openSet.dequeue()
+      if (!currentNodeId) break
+
+      if (closedSet.has(currentNodeId)) continue
+      closedSet.add(currentNodeId)
+      exploredNodes++
+
+      // Si on a atteint la destination
+      if (currentNodeId === endNodeId) {
+        break
+      }
+
+      const currentNode = graph.nodes.get(currentNodeId)!
+      const currentGScore = gScore.get(currentNodeId)!
+
+      // Vérifier la distance maximale
+      if (options.maxDistance && currentGScore > options.maxDistance) {
+        continue
+      }
+
+      // Explorer les voisins
+      for (const neighborId of currentNode.connections) {
+        if (closedSet.has(neighborId)) continue
+
+        const edgeId = `${currentNodeId}-${neighborId}`
+        const reverseEdgeId = `${neighborId}-${currentNodeId}`
+        
+        // Trouver l'arête
+        let edge = graph.edges.get(edgeId)
+        if (!edge) {
+          edge = graph.edges.get(reverseEdgeId)
+        }
+        
+        if (!edge) continue
+
+        // Vérifier si cette arête doit être évitée
+        if (options.avoidEdges && options.avoidEdges.includes(edge.id)) {
+          continue
+        }
+
+        // Calculer le nouveau coût
+        let edgeWeight = edge.weight
+        
+        // Appliquer les préférences d'arêtes
+        if (options.preferEdges && options.preferEdges.includes(edge.id)) {
+          edgeWeight *= 0.5
+        }
+
+        // Appliquer la fonction de poids personnalisée
+        if (options.customWeightFunction) {
+          const neighborNode = graph.nodes.get(neighborId)!
+          edgeWeight = options.customWeightFunction(edge, currentNode, neighborNode)
+        }
+
+        const tentativeGScore = currentGScore + edgeWeight
+        const existingGScore = gScore.get(neighborId)!
+
+        if (tentativeGScore < existingGScore) {
+          previous.set(neighborId, currentNodeId)
+          gScore.set(neighborId, tentativeGScore)
+          
+          const neighborNode = graph.nodes.get(neighborId)!
+          const hScore = this.heuristic(neighborNode, endNode)
+          const newFScore = tentativeGScore + hScore
+          
+          fScore.set(neighborId, newFScore)
+          openSet.enqueue(neighborId, newFScore)
+        }
+      }
+    }
+
+    // Vérifier si on a trouvé un chemin
+    if (!closedSet.has(endNodeId)) {
+      return null
+    }
+
+    // Reconstruire le chemin
+    const path = this.reconstructPath(previous, startNodeId, endNodeId)
+    if (!path || path.length === 0) {
+      return null
+    }
+
+    // Calculer les métriques du chemin
+    const result = this.calculatePathMetrics(graph, path)
+    
+    console.log(`A* completed: ${path.length} nodes, ${result.distance.toFixed(0)}m, ${Date.now() - startTime}ms`)
+    
+    return result
+  }
+
+  /**
+   * Trouve tous les chemins possibles depuis un point de départ
+   * 
+   * @param graph Graphe à explorer
+   * @param startNodeId ID du nœud de départ
+   * @param maxDistance Distance maximale à explorer
+   * @param options Options de recherche
+   * @returns Map des nœuds accessibles avec leurs distances
+   */
+  exploreFromStart(
+    graph: Graph,
+    startNodeId: string,
+    maxDistance: number,
+    options: PathfindingOptions = {}
+  ): Map<string, { distance: number; path: string[] }> {
+    const startTime = Date.now()
+    
+    const startNode = graph.nodes.get(startNodeId)
+    if (!startNode) {
+      throw new Error(`Start node ${startNodeId} not found in graph`)
+    }
+
+    const distances = new Map<string, number>()
+    const previous = new Map<string, string | null>()
+    const visited = new Set<string>()
+    const queue = new PriorityQueue<string>()
+
+    // Initialiser
+    for (const nodeId of graph.nodes.keys()) {
+      distances.set(nodeId, Infinity)
+      previous.set(nodeId, null)
+    }
+    distances.set(startNodeId, 0)
+
+    queue.enqueue(startNodeId, 0)
+
+    // Exploration
+    while (!queue.isEmpty()) {
+      const currentNodeId = queue.dequeue()
+      if (!currentNodeId) break
+
+      if (visited.has(currentNodeId)) continue
+      visited.add(currentNodeId)
+
+      const currentDistance = distances.get(currentNodeId)!
+
+      // Si on dépasse la distance maximale, on s'arrête
+      if (currentDistance > maxDistance) {
+        continue
+      }
+
+      const currentNode = graph.nodes.get(currentNodeId)!
+
+      // Explorer les voisins
+      for (const neighborId of currentNode.connections) {
+        if (visited.has(neighborId)) continue
+
+        const edgeId = `${currentNodeId}-${neighborId}`
+        const reverseEdgeId = `${neighborId}-${currentNodeId}`
+        
+        let edge = graph.edges.get(edgeId)
+        if (!edge) {
+          edge = graph.edges.get(reverseEdgeId)
+        }
+        
+        if (!edge) continue
+
+        // Vérifier si cette arête doit être évitée
+        if (options.avoidEdges && options.avoidEdges.includes(edge.id)) {
+          continue
+        }
+
+        let edgeWeight = edge.weight
+        
+        if (options.preferEdges && options.preferEdges.includes(edge.id)) {
+          edgeWeight *= 0.5
+        }
+
+        if (options.customWeightFunction) {
+          const neighborNode = graph.nodes.get(neighborId)!
+          edgeWeight = options.customWeightFunction(edge, currentNode, neighborNode)
+        }
+
+        const newDistance = currentDistance + edgeWeight
+        const existingDistance = distances.get(neighborId)!
+
+        if (newDistance < existingDistance) {
+          distances.set(neighborId, newDistance)
+          previous.set(neighborId, currentNodeId)
+          queue.enqueue(neighborId, newDistance)
+        }
+      }
+    }
+
+    // Construire le résultat
+    const result = new Map<string, { distance: number; path: string[] }>()
+    
+    for (const [nodeId, distance] of distances) {
+      if (distance < Infinity && nodeId !== startNodeId) {
+        const path = this.reconstructPath(previous, startNodeId, nodeId)
+        if (path) {
+          result.set(nodeId, { distance, path })
+        }
+      }
+    }
+
+    console.log(`Exploration completed: ${result.size} reachable nodes in ${Date.now() - startTime}ms`)
+    
+    return result
+  }
+
+  /**
+   * Fonction heuristique pour A* (distance à vol d'oiseau)
+   */
+  private heuristic(node1: GraphNode, node2: GraphNode): number {
+    return haversineDistance(node1.lat, node1.lon, node2.lat, node2.lon) * 1000 // Convertir en mètres
+  }
+
+  /**
+   * Reconstruit le chemin à partir de la table des prédécesseurs
+   */
+  private reconstructPath(
+    previous: Map<string, string | null>,
+    startNodeId: string,
+    endNodeId?: string
+  ): string[] | null {
+    if (!endNodeId) {
+      // Si pas de destination spécifique, retourner tous les nœuds accessibles
+      const path: string[] = []
+      for (const [nodeId, prev] of previous) {
+        if (prev !== null || nodeId === startNodeId) {
+          path.push(nodeId)
+        }
+      }
+      return path.length > 0 ? path : null
+    }
+
+    const path: string[] = []
+    let currentNodeId: string | null = endNodeId
+
+    while (currentNodeId !== null) {
+      path.unshift(currentNodeId)
+      currentNodeId = previous.get(currentNodeId) || null
+    }
+
+    // Vérifier que le chemin commence bien au point de départ
+    if (path.length === 0 || path[0] !== startNodeId) {
+      return null
+    }
+
+    return path
+  }
+
+  /**
+   * Calcule les métriques d'un chemin
+   */
+  private calculatePathMetrics(graph: Graph, path: string[]): PathfindingResult {
+    const nodes: GraphNode[] = []
+    const edges: GraphEdge[] = []
+    let totalDistance = 0
+    let totalWeight = 0
+
+    // Récupérer les nœuds
+    for (const nodeId of path) {
+      const node = graph.nodes.get(nodeId)
+      if (node) {
+        nodes.push(node)
+      }
+    }
+
+    // Récupérer les arêtes et calculer les métriques
+    for (let i = 0; i < path.length - 1; i++) {
+      const fromId = path[i]
+      const toId = path[i + 1]
+      
+      const edgeId = `${fromId}-${toId}`
+      const reverseEdgeId = `${toId}-${fromId}`
+      
+      let edge = graph.edges.get(edgeId)
+      if (!edge) {
+        edge = graph.edges.get(reverseEdgeId)
+      }
+      
+      if (edge) {
+        edges.push(edge)
+        totalDistance += edge.distance
+        totalWeight += edge.weight
+      }
+    }
+
     return {
       path,
       distance: totalDistance,
       weight: totalWeight,
-      found: path.length > 1,
-      explored
+      nodes,
+      edges
     }
   }
 
   /**
-   * Find multiple paths to different targets
+   * Trouve les meilleurs points candidats pour la génération de boucles
+   * 
+   * @param graph Graphe à explorer
+   * @param startNodeId ID du nœud de départ
+   * @param targetDistance Distance cible en mètres
+   * @param options Options de recherche
+   * @returns Points candidats avec leurs scores
    */
-  findMultiplePaths(
-    startId: string, 
-    targetIds: string[]
-  ): Map<string, PathfindingResult> {
-    console.log(`🔍 Dijkstra: Finding paths to ${targetIds.length} targets`)
-    
-    const results = new Map<string, PathfindingResult>()
-    const distances = new Map<string, number>()
-    const previous = new Map<string, string | null>()
-    const visited = new Set<string>()
-    const queue = new PriorityQueue<string>()
-    
-    // Initialize distances
-    for (const nodeId of this.graph.nodes.keys()) {
-      distances.set(nodeId, Infinity)
+  findCandidatePoints(
+    graph: Graph,
+    startNodeId: string,
+    targetDistance: number,
+    options: PathfindingOptions = {}
+  ): Array<{ nodeId: string; distance: number; score: number; path: string[] }> {
+    const startNode = graph.nodes.get(startNodeId)
+    if (!startNode) {
+      throw new Error(`Start node ${startNodeId} not found in graph`)
     }
-    distances.set(startId, 0)
-    
-    queue.enqueue(startId, 0)
-    let explored = 0
-    const targetsFound = new Set<string>()
-    
-    while (!queue.isEmpty() && 
-           explored < (this.config.maxNodes || 10000) && 
-           targetsFound.size < targetIds.length) {
+
+    // Explorer depuis le point de départ
+    const explorationResult = this.exploreFromStart(
+      graph,
+      startNodeId,
+      targetDistance * 1.2, // Explorer un peu plus loin
+      options
+    )
+
+    const candidates: Array<{ nodeId: string; distance: number; score: number; path: string[] }> = []
+
+    // Évaluer chaque point accessible
+    for (const [nodeId, { distance, path }] of explorationResult) {
+      const node = graph.nodes.get(nodeId)!
       
-      const currentNodeId = queue.dequeue()
-      if (!currentNodeId) break
+      // Calculer le score basé sur plusieurs critères
+      let score = 0
       
-      if (visited.has(currentNodeId)) continue
-      visited.add(currentNodeId)
-      explored++
+      // Score de distance (préférer ~50% de la distance cible)
+      const distanceRatio = distance / targetDistance
+      const distanceScore = 1 - Math.abs(distanceRatio - 0.5) * 2 // Score max à 0.5
+      score += distanceScore * 0.4
       
-      // Check if we've reached any target
-      if (targetIds.includes(currentNodeId)) {
-        targetsFound.add(currentNodeId)
-        const path = this.reconstructPath(startId, currentNodeId, previous)
-        const totalDistance = this.calculatePathDistance(path)
-        const totalWeight = distances.get(currentNodeId) || Infinity
+      // Score de diversité angulaire (éviter les retours directs)
+      const bearing = calculateBearing(startNode.lat, startNode.lon, node.lat, node.lon)
+      const angularScore = Math.sin(bearing * Math.PI / 180) // Score basé sur l'angle
+      score += Math.abs(angularScore) * 0.3
+      
+      // Score de qualité du chemin (basé sur les surfaces)
+      let pathQuality = 0
+      for (let i = 0; i < path.length - 1; i++) {
+        const edgeId = `${path[i]}-${path[i + 1]}`
+        const reverseEdgeId = `${path[i + 1]}-${path[i]}`
         
-        results.set(currentNodeId, {
-          path,
-          distance: totalDistance,
-          weight: totalWeight,
-          found: true,
-          explored
-        })
-      }
-      
-      // Check distance limit
-      const currentDistance = distances.get(currentNodeId) || 0
-      if (this.config.maxDistance && currentDistance > this.config.maxDistance) {
-        continue
-      }
-      
-      const currentNode = this.graph.nodes.get(currentNodeId)
-      if (!currentNode) continue
-      
-      // Explore neighbors
-      for (const neighborId of currentNode.connections) {
-        if (visited.has(neighborId)) continue
+        let edge = graph.edges.get(edgeId)
+        if (!edge) {
+          edge = graph.edges.get(reverseEdgeId)
+        }
         
-        const edge = this.findEdge(currentNodeId, neighborId)
-        if (!edge) continue
-        
-        // Calculate new distance
-        const edgeWeight = this.calculateEdgeWeight(edge, currentNode, this.graph.nodes.get(neighborId)!)
-        const newDistance = currentDistance + edgeWeight
-        
-        const currentNeighborDistance = distances.get(neighborId) || Infinity
-        
-        if (newDistance < currentNeighborDistance) {
-          distances.set(neighborId, newDistance)
-          previous.set(neighborId, currentNodeId)
-          queue.enqueue(neighborId, newDistance)
+        if (edge) {
+          if (edge.surface === 'paved') pathQuality += 1
+          else if (edge.surface === 'mixed') pathQuality += 0.5
+          else pathQuality += 0.2
         }
       }
+      score += (pathQuality / Math.max(path.length - 1, 1)) * 0.3
+      
+      candidates.push({
+        nodeId,
+        distance,
+        score,
+        path
+      })
     }
-    
-    return results
-  }
 
-  /**
-   * Find the closest node to a target distance
-   */
-  findClosestToDistance(
-    startId: string, 
-    targetDistance: number, 
-    tolerance: number = 0.1
-  ): PathfindingResult | null {
-    console.log(`🔍 Dijkstra: Finding path closest to ${targetDistance}m`)
+    // Trier par score décroissant
+    candidates.sort((a, b) => b.score - a.score)
     
-    const distances = new Map<string, number>()
-    const previous = new Map<string, string | null>()
-    const visited = new Set<string>()
-    const queue = new PriorityQueue<string>()
-    
-    // Initialize distances
-    for (const nodeId of this.graph.nodes.keys()) {
-      distances.set(nodeId, Infinity)
-    }
-    distances.set(startId, 0)
-    
-    queue.enqueue(startId, 0)
-    let explored = 0
-    let bestMatch: { nodeId: string; distance: number; path: string[] } | null = null
-    
-    while (!queue.isEmpty() && explored < (this.config.maxNodes || 10000)) {
-      const currentNodeId = queue.dequeue()
-      if (!currentNodeId) break
-      
-      if (visited.has(currentNodeId)) continue
-      visited.add(currentNodeId)
-      explored++
-      
-      const currentNode = this.graph.nodes.get(currentNodeId)
-      if (!currentNode) continue
-      
-      // Calculate actual distance to this node
-      const path = this.reconstructPath(startId, currentNodeId, previous)
-      const actualDistance = this.calculatePathDistance(path)
-      
-      // Check if this is a good match
-      const distanceError = Math.abs(actualDistance - targetDistance) / targetDistance
-      if (distanceError <= tolerance) {
-        if (!bestMatch || distanceError < Math.abs(bestMatch.distance - targetDistance) / targetDistance) {
-          bestMatch = {
-            nodeId: currentNodeId,
-            distance: actualDistance,
-            path
-          }
-        }
-      }
-      
-      // Check distance limit
-      const currentWeight = distances.get(currentNodeId) || 0
-      if (this.config.maxDistance && currentWeight > this.config.maxDistance) {
-        continue
-      }
-      
-      // Explore neighbors
-      for (const neighborId of currentNode.connections) {
-        if (visited.has(neighborId)) continue
-        
-        const edge = this.findEdge(currentNodeId, neighborId)
-        if (!edge) continue
-        
-        // Calculate new distance
-        const edgeWeight = this.calculateEdgeWeight(edge, currentNode, this.graph.nodes.get(neighborId)!)
-        const newDistance = currentWeight + edgeWeight
-        
-        const currentNeighborDistance = distances.get(neighborId) || Infinity
-        
-        if (newDistance < currentNeighborDistance) {
-          distances.set(neighborId, newDistance)
-          previous.set(neighborId, currentNodeId)
-          queue.enqueue(neighborId, newDistance)
-        }
-      }
-    }
-    
-    if (bestMatch) {
-      return {
-        path: bestMatch.path,
-        distance: bestMatch.distance,
-        weight: distances.get(bestMatch.nodeId) || Infinity,
-        found: true,
-        explored
-      }
-    }
-    
-    return null
-  }
-
-  /**
-   * Find edge between two nodes
-   */
-  private findEdge(fromId: string, toId: string): GraphEdge | null {
-    const edgeId1 = `${fromId}-${toId}`
-    const edgeId2 = `${toId}-${fromId}`
-    
-    return this.graph.edges.get(edgeId1) || this.graph.edges.get(edgeId2) || null
-  }
-
-  /**
-   * Calculate edge weight with custom function
-   */
-  private calculateEdgeWeight(
-    edge: GraphEdge, 
-    fromNode: GraphNode, 
-    toNode: GraphNode
-  ): number {
-    if (this.config.customWeight) {
-      return this.config.customWeight(edge, fromNode, toNode, [])
-    }
-    return edge.weight
-  }
-
-  /**
-   * Reconstruct path from start to end
-   */
-  private reconstructPath(
-    startId: string, 
-    endId: string, 
-    previous: Map<string, string | null>
-  ): string[] {
-    const path: string[] = []
-    let currentId: string | null = endId
-    
-    while (currentId !== null) {
-      path.unshift(currentId)
-      currentId = previous.get(currentId) || null
-    }
-    
-    // Check if we actually reached the start node
-    if (path.length === 0 || path[0] !== startId) {
-      return []
-    }
-    
-    // Special case: if start and end are the same, return single node
-    if (startId === endId && path.length === 1) {
-      return path
-    }
-    
-    return path
-  }
-
-  /**
-   * Calculate total distance of a path
-   */
-  private calculatePathDistance(path: string[]): number {
-    let totalDistance = 0
-    
-    for (let i = 0; i < path.length - 1; i++) {
-      const edge = this.findEdge(path[i], path[i + 1])
-      if (edge) {
-        totalDistance += edge.distance
-      }
-    }
-    
-    return totalDistance
+    return candidates.slice(0, 20) // Retourner les 20 meilleurs candidats
   }
 }
 
 /**
- * A* algorithm implementation
+ * Instance singleton des algorithmes de pathfinding
  */
-export class AStarPathfinder {
-  private graph: WeightedGraph
-  private config: PathfindingConfig
-
-  constructor(graph: WeightedGraph, config: PathfindingConfig = {}) {
-    this.graph = graph
-    this.config = config
-  }
-
-  /**
-   * Find shortest path using A* algorithm
-   */
-  findPath(startId: string, endId: string): PathfindingResult {
-    console.log(`⭐ A*: Finding path from ${startId} to ${endId}`)
-    
-    const gScore = new Map<string, number>()
-    const fScore = new Map<string, number>()
-    const previous = new Map<string, string | null>()
-    const openSet = new PriorityQueue<string>()
-    const openSetHash = new Set<string>()
-    const closedSet = new Set<string>()
-    
-    // Initialize scores
-    for (const nodeId of this.graph.nodes.keys()) {
-      gScore.set(nodeId, Infinity)
-      fScore.set(nodeId, Infinity)
-    }
-    
-    gScore.set(startId, 0)
-    fScore.set(startId, this.heuristic(startId, endId))
-    
-    openSet.enqueue(startId, fScore.get(startId)!)
-    openSetHash.add(startId)
-    
-    let explored = 0
-    
-    while (!openSet.isEmpty() && explored < (this.config.maxNodes || 10000)) {
-      const currentNodeId = openSet.dequeue()
-      if (!currentNodeId) break
-      
-      openSetHash.delete(currentNodeId)
-      
-      if (currentNodeId === endId) {
-        const path = this.reconstructPath(startId, endId, previous)
-        const totalDistance = this.calculatePathDistance(path)
-        
-        return {
-          path,
-          distance: totalDistance,
-          weight: gScore.get(endId)!,
-          found: true,
-          explored
-        }
-      }
-      
-      closedSet.add(currentNodeId)
-      explored++
-      
-      const currentNode = this.graph.nodes.get(currentNodeId)
-      if (!currentNode) continue
-      
-      // Explore neighbors
-      for (const neighborId of currentNode.connections) {
-        if (closedSet.has(neighborId)) continue
-        
-        const edge = this.findEdge(currentNodeId, neighborId)
-        if (!edge) continue
-        
-        const tentativeGScore = gScore.get(currentNodeId)! + this.calculateEdgeWeight(edge, currentNode, this.graph.nodes.get(neighborId)!)
-        
-        if (tentativeGScore < (gScore.get(neighborId) || Infinity)) {
-          previous.set(neighborId, currentNodeId)
-          gScore.set(neighborId, tentativeGScore)
-          fScore.set(neighborId, tentativeGScore + this.heuristic(neighborId, endId))
-          
-          if (!openSetHash.has(neighborId)) {
-            openSet.enqueue(neighborId, fScore.get(neighborId)!)
-            openSetHash.add(neighborId)
-          }
-        }
-      }
-    }
-    
-    // No path found
-    return {
-      path: [],
-      distance: 0,
-      weight: Infinity,
-      found: false,
-      explored
-    }
-  }
-
-  /**
-   * Calculate heuristic function
-   */
-  private heuristic(fromId: string, toId: string): number {
-    if (this.config.customHeuristic) {
-      const fromNode = this.graph.nodes.get(fromId)
-      const toNode = this.graph.nodes.get(toId)
-      if (fromNode && toNode) {
-        return this.config.customHeuristic(fromNode, toNode)
-      }
-    }
-    
-    // Default: straight-line distance
-    const fromNode = this.graph.nodes.get(fromId)
-    const toNode = this.graph.nodes.get(toId)
-    if (fromNode && toNode) {
-      return haversineDistance(fromNode.lat, fromNode.lon, toNode.lat, toNode.lon)
-    }
-    
-    return 0
-  }
-
-  /**
-   * Find edge between two nodes
-   */
-  private findEdge(fromId: string, toId: string): GraphEdge | null {
-    const edgeId1 = `${fromId}-${toId}`
-    const edgeId2 = `${toId}-${fromId}`
-    
-    return this.graph.edges.get(edgeId1) || this.graph.edges.get(edgeId2) || null
-  }
-
-  /**
-   * Calculate edge weight with custom function
-   */
-  private calculateEdgeWeight(
-    edge: GraphEdge, 
-    fromNode: GraphNode, 
-    toNode: GraphNode
-  ): number {
-    if (this.config.customWeight) {
-      return this.config.customWeight(edge, fromNode, toNode, [])
-    }
-    return edge.weight
-  }
-
-  /**
-   * Reconstruct path from start to end
-   */
-  private reconstructPath(
-    startId: string, 
-    endId: string, 
-    previous: Map<string, string | null>
-  ): string[] {
-    const path: string[] = []
-    let currentId: string | null = endId
-    
-    while (currentId !== null) {
-      path.unshift(currentId)
-      currentId = previous.get(currentId) || null
-    }
-    
-    // Check if we actually reached the start node
-    if (path.length === 0 || path[0] !== startId) {
-      return []
-    }
-    
-    // Special case: if start and end are the same, return single node
-    if (startId === endId && path.length === 1) {
-      return path
-    }
-    
-    return path
-  }
-
-  /**
-   * Calculate total distance of a path
-   */
-  private calculatePathDistance(path: string[]): number {
-    let totalDistance = 0
-    
-    for (let i = 0; i < path.length - 1; i++) {
-      const edge = this.findEdge(path[i], path[i + 1])
-      if (edge) {
-        totalDistance += edge.distance
-      }
-    }
-    
-    return totalDistance
-  }
-}
-
-/**
- * Pathfinding utilities
- */
-export class PathfindingUtils {
-  /**
-   * Create a weight function that avoids certain edges
-   */
-  static createAvoidEdgesWeight(avoidEdges: Set<string>, penalty: number = 1000): WeightFunction {
-    return (edge: GraphEdge) => {
-      if (avoidEdges.has(edge.id)) {
-        return edge.weight * penalty
-      }
-      return edge.weight
-    }
-  }
-
-  /**
-   * Create a weight function that prefers certain edges
-   */
-  static createPreferEdgesWeight(preferEdges: Set<string>, bonus: number = 0.5): WeightFunction {
-    return (edge: GraphEdge) => {
-      if (preferEdges.has(edge.id)) {
-        return edge.weight * bonus
-      }
-      return edge.weight
-    }
-  }
-
-  /**
-   * Create a weight function that penalizes already used edges
-   */
-  static createUsedEdgesWeight(usedEdges: Set<string>, penalty: number = 5): WeightFunction {
-    return (edge: GraphEdge) => {
-      if (usedEdges.has(edge.id)) {
-        return edge.weight * penalty
-      }
-      return edge.weight
-    }
-  }
-
-  /**
-   * Create a heuristic function based on straight-line distance
-   */
-  static createDistanceHeuristic(): HeuristicFunction {
-    return (fromNode: GraphNode, toNode: GraphNode) => {
-      return haversineDistance(fromNode.lat, fromNode.lon, toNode.lat, toNode.lon)
-    }
-  }
-
-  /**
-   * Create a heuristic function that considers elevation
-   */
-  static createElevationHeuristic(elevationWeight: number = 0.1): HeuristicFunction {
-    return (fromNode: GraphNode, toNode: GraphNode) => {
-      const distance = haversineDistance(fromNode.lat, fromNode.lon, toNode.lat, toNode.lon)
-      const elevationDiff = Math.abs((toNode.elevation || 0) - (fromNode.elevation || 0))
-      return distance + (elevationDiff * elevationWeight)
-    }
-  }
-
-  /**
-   * Calculate path quality metrics
-   */
-  static calculatePathQuality(
-    path: string[],
-    graph: WeightedGraph,
-    targetDistance: number
-  ): {
-    distanceAccuracy: number
-    pathUniqueness: number
-    surfaceQuality: number
-    totalScore: number
-  } {
-    if (path.length < 2) {
-      return { distanceAccuracy: 0, pathUniqueness: 0, surfaceQuality: 0, totalScore: 0 }
-    }
-
-    // Calculate distance accuracy
-    let totalDistance = 0
-    const usedEdges = new Set<string>()
-    const surfaceTypes: Record<string, number> = {}
-    
-    for (let i = 0; i < path.length - 1; i++) {
-      const edgeId1 = `${path[i]}-${path[i + 1]}`
-      const edgeId2 = `${path[i + 1]}-${path[i]}`
-      const edge = graph.edges.get(edgeId1) || graph.edges.get(edgeId2)
-      
-      if (edge) {
-        totalDistance += edge.distance
-        usedEdges.add(edge.id)
-        
-        // Track surface types
-        const surface = edge.surface
-        surfaceTypes[surface] = (surfaceTypes[surface] || 0) + edge.distance
-      }
-    }
-    
-    // Calculate metrics
-    const distanceAccuracy = Math.max(0, 1 - Math.abs(totalDistance - targetDistance) / targetDistance)
-    const pathUniqueness = usedEdges.size / (path.length - 1)
-    
-    // Calculate surface quality
-    const totalSurfaceDistance = Object.values(surfaceTypes).reduce((sum, dist) => sum + dist, 0)
-    let surfaceQuality = 0
-    if (totalSurfaceDistance > 0) {
-      const pavedDistance = (surfaceTypes.paved || 0) + (surfaceTypes.mixed || 0) * 0.5
-      surfaceQuality = pavedDistance / totalSurfaceDistance
-    }
-    
-    const totalScore = 0.4 * distanceAccuracy + 0.3 * pathUniqueness + 0.3 * surfaceQuality
-    
-    return {
-      distanceAccuracy,
-      pathUniqueness,
-      surfaceQuality,
-      totalScore
-    }
-  }
-}
+export const pathfindingAlgorithms = new PathfindingAlgorithms()

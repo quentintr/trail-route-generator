@@ -6,7 +6,7 @@ class ApiService {
   private baseURL: string
 
   constructor() {
-    this.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    this.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
     
     this.api = axios.create({
       baseURL: this.baseURL,
@@ -37,6 +37,7 @@ class ApiService {
     // Response interceptor for error handling and token refresh
     this.api.interceptors.response.use(
       (response: AxiosResponse) => {
+        console.log('Axios Response Interceptor:', response.data)
         return response
       },
       async (error) => {
@@ -117,8 +118,15 @@ class ApiService {
 
   // Route methods
   async generateRoute(request: any) {
-    const response = await this.api.post('/api/v1/routes/generate', request)
-    return response.data
+    console.log('API Service: Sending request to /api/routes/generate', request)
+    try {
+      const response = await this.api.post('/api/routes/generate', request)
+      console.log('API Service: Received response', response.data)
+      return response.data
+    } catch (error) {
+      console.error('API Service: Error in generateRoute', error)
+      throw error
+    }
   }
 
   async getRoute(id: string) {

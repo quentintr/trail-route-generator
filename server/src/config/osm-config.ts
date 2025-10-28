@@ -14,15 +14,17 @@
 export const OVERPASS_CONFIG = {
   /** URL de l'API Overpass */
   endpoint: 'https://overpass-api.de/api/interpreter',
+  /** URL alternative */
+  alternativeEndpoint: 'https://lz4.overpass-api.de/api/interpreter',
   
   /** Timeout pour les requêtes (en millisecondes) */
-  timeout: 30000,
+  timeout: 60000,
   
   /** Taille maximale de la zone de recherche (en degrés) */
-  maxAreaSize: 0.1,
+  maxAreaSize: 0.25,
   
   /** Nombre maximum de nœuds à récupérer */
-  maxNodes: 10000
+  maxNodes: 5000
 } as const
 
 /**
@@ -227,6 +229,10 @@ export const configUtils = {
         way["highway"~"^(${tags.join('|')})$"](${area.south},${area.west},${area.north},${area.east});
       );
       out geom;
+      (
+        node(w);
+      );
+      out;
     `
   }),
 

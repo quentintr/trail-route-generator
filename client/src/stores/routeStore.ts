@@ -37,7 +37,7 @@ interface RouteState {
   clearError: () => void
 }
 
-export const useRouteStore = create<RouteState>((set, get) => ({
+export const useRouteStore = create<RouteState>((set, _get) => ({
   routes: [],
   currentRoute: null,
   isLoading: false,

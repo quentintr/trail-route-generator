@@ -1,601 +1,556 @@
 /**
- * Graph Builder Service for Loop Generation
+ * Service de construction de graphe à partir des données OSM
  * 
- * Builds weighted graphs from OSM data with intelligent filtering and weighting.
- * Implements the graph construction logic specified in loop-generation-instructions.md
+ * Ce service transforme les données OpenStreetMap en un graphe pondéré
+ * optimisé pour la recherche de chemins et la génération de boucles.
+ * 
+ * Fonctionnalités :
+ * - Construction de graphe à partir des données OSM
+ * - Filtrage et pondération des arêtes
+ * - Structures de données efficaces (Map pour O(1) lookups)
+ * - Support des différents types de surfaces et difficultés
  */
 
-import { osmService } from './osm-service'
+import { osmService, GeoJSONFeature } from './osm-service'
+import { SearchArea } from '../config/osm-config'
 import { 
   haversineDistance, 
-  calculateSearchRadius
+  validateCoordinates
 } from '../utils/geo-utils'
 
 /**
- * Graph node representing a point in the network
+ * Types pour le graphe
  */
 export interface GraphNode {
   id: string
   lat: number
   lon: number
-  connections: string[] // IDs of connected nodes
-  elevation?: number
-  tags?: Record<string, string>
+  connections: string[] // IDs des nœuds connectés
+  properties?: {
+    highway?: string
+    surface?: string
+    difficulty?: 'easy' | 'medium' | 'hard'
+    name?: string
+  }
 }
 
-/**
- * Graph edge representing a path between nodes
- */
 export interface GraphEdge {
   id: string
   from: string
   to: string
-  distance: number // meters
+  distance: number // en mètres
   surface: 'paved' | 'unpaved' | 'mixed'
   highway_type: string
-  weight: number // calculated weight for pathfinding
-  geometry?: Array<[number, number]> // intermediate points
-  tags?: Record<string, string>
+  weight: number // poids calculé pour le pathfinding
+  properties?: {
+    name?: string
+    access?: string
+    foot?: string
+    bicycle?: string
+    motor_vehicle?: string
+    width?: string
+    smoothness?: string
+    tracktype?: string
+    trail_visibility?: string
+  }
 }
 
-/**
- * Weighted graph structure
- */
-export interface WeightedGraph {
+export interface Graph {
   nodes: Map<string, GraphNode>
   edges: Map<string, GraphEdge>
-  nodeConnections: Map<string, string[]> // adjacency list for fast lookups
+  bounds: {
+    north: number
+    south: number
+    east: number
+    west: number
+  }
+  metadata: {
+    totalNodes: number
+    totalEdges: number
+    buildTime: number
+    osmFeatures: number
+  }
 }
 
-/**
- * Graph building options
- */
 export interface GraphBuildOptions {
-  targetDistance: number // meters
-  startLat: number
-  startLon: number
   includeSecondary?: boolean
   surfaceTypes?: string[]
   difficulty?: string[]
-  maxNodes?: number
+  maxLength?: number
+  minPathLength?: number // Longueur minimale d'un chemin pour l'inclure
+  weightFactors?: {
+    distance?: number // Facteur de poids pour la distance (défaut: 1.0)
+    surface?: number // Bonus/malus pour le type de surface (défaut: 0.2)
+    safety?: number // Malus pour les routes dangereuses (défaut: 0.5)
+    popularity?: number // Bonus pour les chemins populaires (défaut: 0.1)
+  }
 }
 
 /**
- * Surface type weights for pathfinding
- */
-const SURFACE_WEIGHTS: Record<string, number> = {
-  'paved': 1.0,
-  'asphalt': 1.0,
-  'concrete': 1.0,
-  'brick': 1.1,
-  'paving_stones': 1.1,
-  'cobblestone': 1.2,
-  'mixed': 1.3,
-  'unpaved': 1.5,
-  'dirt': 1.5,
-  'gravel': 1.4,
-  'fine_gravel': 1.3,
-  'grass': 1.6,
-  'sand': 2.0,
-  'rock': 2.5,
-  'mud': 3.0
-}
-
-/**
- * Highway type weights for pathfinding
- */
-const HIGHWAY_WEIGHTS: Record<string, number> = {
-  'footway': 1.0,
-  'path': 1.1,
-  'track': 1.2,
-  'cycleway': 1.1,
-  'residential': 1.3,
-  'living_street': 1.2,
-  'unclassified': 1.4,
-  'service': 1.5,
-  'pedestrian': 1.0,
-  'steps': 1.8,
-  'bridleway': 1.3
-}
-
-/**
- * Safety scores for different road types
- */
-const SAFETY_SCORES: Record<string, number> = {
-  'footway': 1.0,
-  'path': 1.0,
-  'track': 1.0,
-  'cycleway': 1.1,
-  'residential': 1.2,
-  'living_street': 1.0,
-  'unclassified': 1.3,
-  'service': 1.4,
-  'pedestrian': 1.0,
-  'steps': 1.5,
-  'bridleway': 1.1,
-  'motorway': 0.0, // Excluded
-  'trunk': 0.0,    // Excluded
-  'primary': 0.0,  // Excluded
-  'secondary': 0.0 // Excluded
-}
-
-/**
- * Graph Builder Service
+ * Service de construction de graphe
  */
 export class GraphBuilder {
-  private graph: WeightedGraph
-  private options: GraphBuildOptions
+  private cache = new Map<string, Graph>()
+  private readonly CACHE_TTL = 30 * 60 * 1000 // 30 minutes
 
-  constructor(options: GraphBuildOptions) {
-    this.options = options
-    this.graph = {
-      nodes: new Map(),
-      edges: new Map(),
-      nodeConnections: new Map()
+  /**
+   * Construit un graphe à partir des données OSM pour une zone donnée
+   * 
+   * @param centerPoint Point central {lat, lon}
+   * @param radiusKm Rayon de recherche en km
+   * @param options Options de construction
+   * @returns Graphe pondéré
+   */
+  async buildGraph(
+    centerPoint: { lat: number; lon: number },
+    radiusKm: number,
+    options: GraphBuildOptions = {}
+  ): Promise<Graph> {
+    const startTime = Date.now()
+    
+    // Valider les coordonnées
+    if (!validateCoordinates(centerPoint.lat, centerPoint.lon)) {
+      throw new Error('Invalid center coordinates')
+    }
+
+    // Vérifier le cache
+    const cacheKey = this.generateCacheKey(centerPoint, radiusKm, options)
+    const cached = this.getCachedGraph(cacheKey)
+    if (cached) {
+      console.log('Using cached graph')
+      return cached
+    }
+
+    try {
+      // Créer la zone de recherche
+      const searchArea = this.createSearchArea(centerPoint, radiusKm)
+      
+      // Récupérer les données OSM
+      console.log('Fetching OSM data for area:', searchArea)
+      const osmData = await osmService.getRunningPaths(searchArea, {
+        includeSecondary: options.includeSecondary || false,
+        surfaceTypes: options.surfaceTypes,
+        difficulty: options.difficulty,
+        maxLength: options.maxLength
+      })
+
+      console.log(`Retrieved ${osmData.features.length} OSM features`)
+
+      // Construire le graphe
+      const graph = await this.buildGraphFromOSM(osmData.features, options)
+      
+      // Ajouter les métadonnées
+      graph.metadata = {
+        totalNodes: graph.nodes.size,
+        totalEdges: graph.edges.size,
+        buildTime: Date.now() - startTime,
+        osmFeatures: osmData.features.length
+      }
+
+      // Mettre en cache
+      this.cacheGraph(cacheKey, graph)
+
+      console.log(`Graph built: ${graph.nodes.size} nodes, ${graph.edges.size} edges in ${graph.metadata.buildTime}ms`)
+      
+      return graph
+    } catch (error) {
+      console.error('Error building graph:', error)
+      throw new Error(`Failed to build graph: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   /**
-   * Build the weighted graph from OSM data
+   * Construit un graphe à partir des features OSM
    */
-  async buildGraph(): Promise<WeightedGraph> {
-    console.log('🏗️ Building weighted graph...')
+  private async buildGraphFromOSM(
+    features: GeoJSONFeature[],
+    options: GraphBuildOptions
+  ): Promise<Graph> {
+    const nodes = new Map<string, GraphNode>()
+    const edges = new Map<string, GraphEdge>()
     
-    // Calculate search radius
-    const searchRadius = calculateSearchRadius(this.options.targetDistance)
-    console.log(`📍 Search radius: ${(searchRadius / 1000).toFixed(2)}km`)
-    
-    // Create search area
-    const searchArea = this.createSearchArea(
-      this.options.startLat,
-      this.options.startLon,
-      searchRadius
-    )
-    
-    // Fetch OSM data
-    console.log('🗺️ Fetching OSM data...')
-    const osmData = await osmService.getRunningPaths(searchArea, {
-      includeSecondary: this.options.includeSecondary,
-      surfaceTypes: this.options.surfaceTypes,
-      difficulty: this.options.difficulty
-    })
-    
-    console.log(`📊 Found ${osmData.features.length} OSM features`)
-    
-    // Build graph from OSM data
-    this.buildGraphFromOSM(osmData)
-    
-    // Apply graph optimizations
-    this.optimizeGraph()
-    
-    console.log(`✅ Graph built: ${this.graph.nodes.size} nodes, ${this.graph.edges.size} edges`)
-    
-    return this.graph
-  }
-
-  /**
-   * Create search area around start point
-   */
-  private createSearchArea(
-    startLat: number,
-    startLon: number,
-    radius: number
-  ) {
-    // Convert radius from meters to degrees (approximate)
-    const latRadius = radius / 111000 // 1 degree ≈ 111km
-    const lonRadius = radius / (111000 * Math.cos(startLat * Math.PI / 180))
-    
-    return {
-      north: startLat + latRadius,
-      south: startLat - latRadius,
-      east: startLon + lonRadius,
-      west: startLon - lonRadius
-    }
-  }
-
-  /**
-   * Build graph from OSM GeoJSON data
-   */
-  private buildGraphFromOSM(osmData: any) {
-    const nodeMap = new Map<string, GraphNode>()
-    const edgeMap = new Map<string, GraphEdge>()
-    
-    // Process each OSM feature
-    for (const feature of osmData.features) {
+    // Parcourir toutes les features
+    for (const feature of features) {
       if (feature.geometry.type !== 'LineString') continue
       
       const coordinates = feature.geometry.coordinates
-      const properties = feature.properties
-      
-      // Filter based on highway type
-      if (!this.isValidHighwayType(properties.highway)) continue
-      
-      // Create nodes for each coordinate
-      const nodeIds: string[] = []
-      for (let i = 0; i < coordinates.length; i++) {
-        const [lon, lat] = coordinates[i]
-        const nodeId = `${lat.toFixed(6)},${lon.toFixed(6)}`
-        
-        if (!nodeMap.has(nodeId)) {
-          nodeMap.set(nodeId, {
-            id: nodeId,
-            lat,
-            lon,
-            connections: [],
-            tags: properties
-          })
-        }
-        
-        nodeIds.push(nodeId)
-      }
-      
-      // Create edges between consecutive nodes
-      for (let i = 0; i < nodeIds.length - 1; i++) {
-        const fromId = nodeIds[i]
-        const toId = nodeIds[i + 1]
-        const edgeId = `${fromId}-${toId}`
-        
-        // Calculate edge properties
-        const fromNode = nodeMap.get(fromId)!
-        const toNode = nodeMap.get(toId)!
-        const distance = haversineDistance(
-          fromNode.lat, fromNode.lon,
-          toNode.lat, toNode.lon
-        )
-        
-        const surface = this.determineSurfaceType(properties.surface)
-        const weight = this.calculateEdgeWeight(
-          distance,
-          surface,
-          properties.highway,
-          properties
-        )
-        
-        // Create edge
-        const edge: GraphEdge = {
-          id: edgeId,
-          from: fromId,
-          to: toId,
-          distance,
-          surface,
-          highway_type: properties.highway,
-          weight,
-          geometry: coordinates.slice(i, i + 2),
-          tags: properties
-        }
-        
-        edgeMap.set(edgeId, edge)
-        
-        // Update node connections
-        fromNode.connections.push(toId)
-        toNode.connections.push(fromId)
+      if (coordinates.length < 2) continue
+
+      // Filtrer par longueur minimale
+      const pathLength = this.calculatePathLength(coordinates)
+      if (options.minPathLength && pathLength < options.minPathLength) continue
+
+      // Créer les nœuds et arêtes pour cette feature
+      await this.processOSMFeature(feature, nodes, edges, options)
+    }
+
+    // Calculer les bounds
+    const bounds = this.calculateGraphBounds(nodes)
+
+    return {
+      nodes,
+      edges,
+      bounds,
+      metadata: {
+        totalNodes: nodes.size,
+        totalEdges: edges.size,
+        buildTime: 0, // Sera rempli par l'appelant
+        osmFeatures: features.length
       }
     }
-    
-    // Apply node limit if specified
-    if (this.options.maxNodes && nodeMap.size > this.options.maxNodes) {
-      this.limitNodes(nodeMap, edgeMap)
-    }
-    
-    // Update graph
-    this.graph.nodes = nodeMap
-    this.graph.edges = edgeMap
-    this.buildAdjacencyList()
   }
 
   /**
-   * Check if highway type is valid for running
+   * Traite une feature OSM pour créer des nœuds et arêtes
    */
-  private isValidHighwayType(highway: string): boolean {
-    const validTypes = [
-      'footway', 'path', 'track', 'cycleway', 'residential',
-      'living_street', 'unclassified', 'service', 'pedestrian',
-      'steps', 'bridleway'
-    ]
-    
-    return validTypes.includes(highway)
+  private async processOSMFeature(
+    feature: GeoJSONFeature,
+    nodes: Map<string, GraphNode>,
+    edges: Map<string, GraphEdge>,
+    options: GraphBuildOptions
+  ): Promise<void> {
+    const coordinates = feature.geometry.coordinates
+    const properties = feature.properties
+
+    // Créer les nœuds
+    const nodeIds: string[] = []
+    for (let i = 0; i < coordinates.length; i++) {
+      const [lon, lat] = coordinates[i]
+      const nodeId = this.generateNodeId(lat, lon)
+      
+      if (!nodes.has(nodeId)) {
+        nodes.set(nodeId, {
+          id: nodeId,
+          lat,
+          lon,
+          connections: [],
+          properties: {
+            highway: properties.highway,
+            surface: properties.surface,
+            difficulty: properties.difficulty,
+            name: properties.name
+          }
+        })
+      }
+      
+      nodeIds.push(nodeId)
+    }
+
+    // Créer les arêtes entre nœuds consécutifs
+    for (let i = 0; i < nodeIds.length - 1; i++) {
+      const fromNode = nodes.get(nodeIds[i])!
+      const toNode = nodes.get(nodeIds[i + 1])!
+      
+      const edgeId = `${nodeIds[i]}-${nodeIds[i + 1]}`
+      const distance = haversineDistance(
+        fromNode.lat, fromNode.lon,
+        toNode.lat, toNode.lon
+      ) * 1000 // Convertir en mètres
+
+      // Calculer le poids de l'arête
+      const weight = this.calculateEdgeWeight(distance, properties, options)
+
+      const edge: GraphEdge = {
+        id: edgeId,
+        from: nodeIds[i],
+        to: nodeIds[i + 1],
+        distance,
+        surface: this.determineSurface(properties.surface),
+        highway_type: properties.highway || 'unknown',
+        weight,
+        properties: {
+          name: properties.name,
+          access: properties.access,
+          foot: properties.foot,
+          bicycle: properties.bicycle,
+          motor_vehicle: properties.motor_vehicle,
+          width: properties.width,
+          smoothness: properties.smoothness,
+          tracktype: properties.tracktype,
+          trail_visibility: properties.trail_visibility
+        }
+      }
+
+      edges.set(edgeId, edge)
+
+      // Ajouter les connexions bidirectionnelles
+      fromNode.connections.push(nodeIds[i + 1])
+      toNode.connections.push(nodeIds[i])
+    }
   }
 
   /**
-   * Determine surface type from OSM tags
+   * Calcule le poids d'une arête
    */
-  private determineSurfaceType(surface: string): 'paved' | 'unpaved' | 'mixed' {
+  private calculateEdgeWeight(
+    distance: number,
+    properties: GeoJSONFeature['properties'],
+    options: GraphBuildOptions
+  ): number {
+    const factors = options.weightFactors || {}
+    let weight = distance // Poids de base = distance
+
+    // Facteur de surface
+    const surfaceFactor = factors.surface || 0.2
+    const surface = this.determineSurface(properties.surface)
+    switch (surface) {
+      case 'paved':
+        weight *= (1 - surfaceFactor) // Bonus pour les surfaces pavées
+        break
+      case 'unpaved':
+        weight *= (1 + surfaceFactor) // Malus pour les surfaces non pavées
+        break
+      case 'mixed':
+        // Pas de modification
+        break
+    }
+
+    // Facteur de sécurité
+    const safetyFactor = factors.safety || 0.5
+    const highwayType = properties.highway || 'unknown'
+    if (this.isDangerousHighway(highwayType)) {
+      weight *= (1 + safetyFactor) // Malus pour les routes dangereuses
+    }
+
+    // Facteur de popularité (simulé - dans une vraie app, utiliser Strava heatmap)
+    const popularityFactor = factors.popularity || 0.1
+    if (this.isPopularPath(properties)) {
+      weight *= (1 - popularityFactor) // Bonus pour les chemins populaires
+    }
+
+    return Math.max(weight, 1) // Poids minimum de 1
+  }
+
+  /**
+   * Détermine le type de surface
+   */
+  private determineSurface(surface?: string): 'paved' | 'unpaved' | 'mixed' {
     if (!surface) return 'mixed'
     
-    const pavedSurfaces = ['paved', 'asphalt', 'concrete', 'brick', 'paving_stones']
-    const unpavedSurfaces = ['unpaved', 'dirt', 'grass', 'gravel', 'sand', 'rock']
+    const pavedSurfaces = ['asphalt', 'concrete', 'paved', 'cobblestone']
+    const unpavedSurfaces = ['dirt', 'grass', 'gravel', 'sand', 'unpaved']
     
-    if (pavedSurfaces.includes(surface)) return 'paved'
-    if (unpavedSurfaces.includes(surface)) return 'unpaved'
+    if (pavedSurfaces.includes(surface.toLowerCase())) {
+      return 'paved'
+    }
+    if (unpavedSurfaces.includes(surface.toLowerCase())) {
+      return 'unpaved'
+    }
+    
     return 'mixed'
   }
 
   /**
-   * Calculate edge weight for pathfinding
+   * Détermine si une route est dangereuse
    */
-  private calculateEdgeWeight(
-    distance: number,
-    _surface: 'paved' | 'unpaved' | 'mixed',
-    highwayType: string,
-    tags: Record<string, string>
-  ): number {
-    let weight = distance // Base weight is distance
-    
-    // Apply surface weight multiplier
-    const surfaceWeight = SURFACE_WEIGHTS[tags.surface || 'mixed'] || 1.0
-    weight *= surfaceWeight
-    
-    // Apply highway type weight
-    const highwayWeight = HIGHWAY_WEIGHTS[highwayType] || 1.0
-    weight *= highwayWeight
-    
-    // Apply safety penalty
-    const safetyScore = SAFETY_SCORES[highwayType] || 1.0
-    if (safetyScore === 0) {
-      weight *= 1000 // Heavily penalize excluded road types
-    } else {
-      weight *= (2 - safetyScore) // Penalize less safe roads
-    }
-    
-    // Apply additional tag-based weights
-    if (tags.access === 'no' || tags.foot === 'no') {
-      weight *= 1000 // Prohibit access
-    }
-    
-    if (tags.smoothness === 'bad' || tags.smoothness === 'very_bad') {
-      weight *= 1.5 // Penalize rough surfaces
-    }
-    
-    if (tags.incline === 'up' || tags.incline === 'down') {
-      weight *= 1.2 // Slight penalty for steep sections
-    }
-    
-    return weight
+  private isDangerousHighway(highwayType: string): boolean {
+    const dangerousTypes = ['motorway', 'trunk', 'primary']
+    return dangerousTypes.includes(highwayType)
   }
 
   /**
-   * Limit number of nodes to improve performance
+   * Détermine si un chemin est populaire (simulation)
    */
-  private limitNodes(nodeMap: Map<string, GraphNode>, edgeMap: Map<string, GraphEdge>) {
-    console.log(`⚠️ Limiting nodes from ${nodeMap.size} to ${this.options.maxNodes}`)
+  private isPopularPath(properties: GeoJSONFeature['properties']): boolean {
+    // Dans une vraie application, utiliser les données Strava heatmap
+    // Pour l'instant, on simule avec certains critères
+    return properties.name !== undefined || 
+           properties.ref !== undefined ||
+           properties.trail_visibility === 'excellent'
+  }
+
+  /**
+   * Calcule la longueur d'un chemin
+   */
+  private calculatePathLength(coordinates: [number, number][]): number {
+    let totalLength = 0
+    for (let i = 1; i < coordinates.length; i++) {
+      const [lon1, lat1] = coordinates[i - 1]
+      const [lon2, lat2] = coordinates[i]
+      totalLength += haversineDistance(lat1, lon1, lat2, lon2)
+    }
+    return totalLength
+  }
+
+  /**
+   * Calcule les bounds du graphe
+   */
+  private calculateGraphBounds(nodes: Map<string, GraphNode>): {
+    north: number
+    south: number
+    east: number
+    west: number
+  } {
+    if (nodes.size === 0) {
+      throw new Error('Cannot calculate bounds of empty graph')
+    }
+
+    let north = -90, south = 90, east = -180, west = 180
     
-    // Sort nodes by distance from start point
-    const nodesArray = Array.from(nodeMap.values())
-    nodesArray.sort((a, b) => {
-      const distA = haversineDistance(
-        this.options.startLat, this.options.startLon,
-        a.lat, a.lon
+    for (const node of nodes.values()) {
+      north = Math.max(north, node.lat)
+      south = Math.min(south, node.lat)
+      east = Math.max(east, node.lon)
+      west = Math.min(west, node.lon)
+    }
+
+    return { north, south, east, west }
+  }
+
+  /**
+   * Génère un ID unique pour un nœud
+   */
+  private generateNodeId(lat: number, lon: number): string {
+    // Utiliser une précision de 6 décimales (~0.1m)
+    const precision = 6
+    const latStr = lat.toFixed(precision)
+    const lonStr = lon.toFixed(precision)
+    return `${latStr},${lonStr}`
+  }
+
+  /**
+   * Crée une zone de recherche autour d'un point
+   */
+  private createSearchArea(centerPoint: { lat: number; lon: number }, radiusKm: number): SearchArea {
+    const latOffset = radiusKm / 111 // Approximation : 1° ≈ 111km
+    const lonOffset = radiusKm / (111 * Math.cos(centerPoint.lat * Math.PI / 180))
+    
+    return {
+      north: centerPoint.lat + latOffset,
+      south: centerPoint.lat - latOffset,
+      east: centerPoint.lon + lonOffset,
+      west: centerPoint.lon - lonOffset
+    }
+  }
+
+  /**
+   * Génère une clé de cache
+   */
+  private generateCacheKey(
+    centerPoint: { lat: number; lon: number },
+    radiusKm: number,
+    options: GraphBuildOptions
+  ): string {
+    const lat = centerPoint.lat.toFixed(4)
+    const lon = centerPoint.lon.toFixed(4)
+    const radius = radiusKm.toFixed(1)
+    const optionsStr = JSON.stringify(options)
+    return `${lat},${lon},${radius},${optionsStr}`
+  }
+
+  /**
+   * Récupère un graphe du cache
+   */
+  private getCachedGraph(key: string): Graph | null {
+    const cached = this.cache.get(key)
+    if (!cached) return null
+    
+    // Vérifier la validité du cache
+    const now = Date.now()
+    if (now - cached.metadata.buildTime > this.CACHE_TTL) {
+      this.cache.delete(key)
+      return null
+    }
+    
+    return cached
+  }
+
+  /**
+   * Met un graphe en cache
+   */
+  private cacheGraph(key: string, graph: Graph): void {
+    // Limiter la taille du cache
+    if (this.cache.size >= 10) {
+      const firstKey = this.cache.keys().next().value
+      if (firstKey) {
+        this.cache.delete(firstKey)
+      }
+    }
+    
+    this.cache.set(key, graph)
+  }
+
+  /**
+   * Trouve le nœud le plus proche d'un point donné
+   */
+  findNearestNode(graph: Graph, targetPoint: { lat: number; lon: number }): GraphNode | null {
+    let nearestNode: GraphNode | null = null
+    let minDistance = Infinity
+
+    for (const node of graph.nodes.values()) {
+      const distance = haversineDistance(
+        targetPoint.lat, targetPoint.lon,
+        node.lat, node.lon
       )
-      const distB = haversineDistance(
-        this.options.startLat, this.options.startLon,
-        b.lat, b.lon
+      
+      if (distance < minDistance) {
+        minDistance = distance
+        nearestNode = node
+      }
+    }
+
+    return nearestNode
+  }
+
+  /**
+   * Trouve tous les nœuds dans un rayon donné
+   */
+  findNodesInRadius(
+    graph: Graph,
+    centerPoint: { lat: number; lon: number },
+    radiusKm: number
+  ): GraphNode[] {
+    const nodes: GraphNode[] = []
+    
+    for (const node of graph.nodes.values()) {
+      const distance = haversineDistance(
+        centerPoint.lat, centerPoint.lon,
+        node.lat, node.lon
       )
-      return distA - distB
-    })
-    
-    // Keep only the closest nodes
-    const keepNodes = new Set(nodesArray.slice(0, this.options.maxNodes).map(n => n.id))
-    
-    // Remove excess nodes
-    for (const [nodeId, _node] of nodeMap) {
-      if (!keepNodes.has(nodeId)) {
-        nodeMap.delete(nodeId)
-      }
-    }
-    
-    // Remove edges connected to removed nodes
-    for (const [edgeId, edge] of edgeMap) {
-      if (!keepNodes.has(edge.from) || !keepNodes.has(edge.to)) {
-        edgeMap.delete(edgeId)
-      }
-    }
-  }
-
-  /**
-   * Build adjacency list for fast lookups
-   */
-  private buildAdjacencyList() {
-    this.graph.nodeConnections.clear()
-    
-    for (const [nodeId, node] of this.graph.nodes) {
-      this.graph.nodeConnections.set(nodeId, node.connections)
-    }
-  }
-
-  /**
-   * Optimize graph for performance
-   */
-  private optimizeGraph() {
-    console.log('⚡ Optimizing graph...')
-    
-    // Remove isolated nodes
-    this.removeIsolatedNodes()
-    
-    // Merge nearby nodes (within 10m)
-    this.mergeNearbyNodes(10)
-    
-    // Remove duplicate edges
-    this.removeDuplicateEdges()
-    
-    console.log(`✅ Graph optimized: ${this.graph.nodes.size} nodes, ${this.graph.edges.size} edges`)
-  }
-
-  /**
-   * Remove nodes with no connections
-   */
-  private removeIsolatedNodes() {
-    const isolatedNodes: string[] = []
-    
-    for (const [nodeId, node] of this.graph.nodes) {
-      if (node.connections.length === 0) {
-        isolatedNodes.push(nodeId)
-      }
-    }
-    
-    for (const nodeId of isolatedNodes) {
-      this.graph.nodes.delete(nodeId)
-      this.graph.nodeConnections.delete(nodeId)
-    }
-    
-    if (isolatedNodes.length > 0) {
-      console.log(`🗑️ Removed ${isolatedNodes.length} isolated nodes`)
-    }
-  }
-
-  /**
-   * Merge nodes that are very close together
-   */
-  private mergeNearbyNodes(maxDistance: number) {
-    const nodesArray = Array.from(this.graph.nodes.values())
-    const mergedNodes = new Set<string>()
-    let mergeCount = 0
-    
-    for (let i = 0; i < nodesArray.length; i++) {
-      if (mergedNodes.has(nodesArray[i].id)) continue
       
-      const node1 = nodesArray[i]
-      const nearbyNodes: string[] = []
-      
-      for (let j = i + 1; j < nodesArray.length; j++) {
-        if (mergedNodes.has(nodesArray[j].id)) continue
-        
-        const node2 = nodesArray[j]
-        const distance = haversineDistance(node1.lat, node1.lon, node2.lat, node2.lon)
-        
-        if (distance <= maxDistance) {
-          nearbyNodes.push(node2.id)
-        }
-      }
-      
-      if (nearbyNodes.length > 0) {
-        // Merge nearby nodes into the first one
-        for (const nearbyNodeId of nearbyNodes) {
-          const nearbyNode = this.graph.nodes.get(nearbyNodeId)!
-          
-          // Transfer connections
-          for (const connection of nearbyNode.connections) {
-            if (!node1.connections.includes(connection)) {
-              node1.connections.push(connection)
-            }
-          }
-          
-          // Update edges
-          for (const [_edgeId, edge] of this.graph.edges) {
-            if (edge.from === nearbyNodeId) {
-              edge.from = node1.id
-            }
-            if (edge.to === nearbyNodeId) {
-              edge.to = node1.id
-            }
-          }
-          
-          // Remove the merged node
-          this.graph.nodes.delete(nearbyNodeId)
-          mergedNodes.add(nearbyNodeId)
-          mergeCount++
-        }
+      if (distance <= radiusKm) {
+        nodes.push(node)
       }
     }
     
-    if (mergeCount > 0) {
-      console.log(`🔗 Merged ${mergeCount} nearby nodes`)
-    }
+    return nodes
   }
 
   /**
-   * Remove duplicate edges
+   * Obtient les statistiques du graphe
    */
-  private removeDuplicateEdges() {
-    const edgeMap = new Map<string, GraphEdge>()
-    let duplicateCount = 0
-    
-    for (const [_edgeId, edge] of this.graph.edges) {
-      const normalizedId = edge.from < edge.to ? 
-        `${edge.from}-${edge.to}` : 
-        `${edge.to}-${edge.from}`
-      
-      if (edgeMap.has(normalizedId)) {
-        duplicateCount++
-        // Keep the edge with lower weight
-        const existingEdge = edgeMap.get(normalizedId)!
-        if (edge.weight < existingEdge.weight) {
-          edgeMap.set(normalizedId, edge)
-        }
-      } else {
-        edgeMap.set(normalizedId, edge)
-      }
-    }
-    
-    this.graph.edges = edgeMap
-    
-    if (duplicateCount > 0) {
-      console.log(`🗑️ Removed ${duplicateCount} duplicate edges`)
-    }
-  }
-
-  /**
-   * Get graph statistics
-   */
-  getGraphStats(): {
+  getGraphStats(graph: Graph): {
     nodeCount: number
     edgeCount: number
     averageConnections: number
-    totalDistance: number
+    surfaceDistribution: Record<string, number>
+    highwayDistribution: Record<string, number>
   } {
     let totalConnections = 0
-    let totalDistance = 0
+    const surfaceCounts: Record<string, number> = {}
+    const highwayCounts: Record<string, number> = {}
     
-    for (const node of this.graph.nodes.values()) {
+    // Compter les connexions et surfaces
+    for (const node of graph.nodes.values()) {
       totalConnections += node.connections.length
     }
     
-    for (const edge of this.graph.edges.values()) {
-      totalDistance += edge.distance
+    for (const edge of graph.edges.values()) {
+      surfaceCounts[edge.surface] = (surfaceCounts[edge.surface] || 0) + 1
+      highwayCounts[edge.highway_type] = (highwayCounts[edge.highway_type] || 0) + 1
     }
     
     return {
-      nodeCount: this.graph.nodes.size,
-      edgeCount: this.graph.edges.size,
-      averageConnections: totalConnections / this.graph.nodes.size,
-      totalDistance
+      nodeCount: graph.nodes.size,
+      edgeCount: graph.edges.size,
+      averageConnections: graph.nodes.size > 0 ? totalConnections / graph.nodes.size : 0,
+      surfaceDistribution: surfaceCounts,
+      highwayDistribution: highwayCounts
     }
-  }
-
-  /**
-   * Find the closest node to a given point
-   */
-  findClosestNode(lat: number, lon: number): GraphNode | null {
-    let closestNode: GraphNode | null = null
-    let minDistance = Infinity
-    
-    for (const node of this.graph.nodes.values()) {
-      const distance = haversineDistance(lat, lon, node.lat, node.lon)
-      if (distance < minDistance) {
-        minDistance = distance
-        closestNode = node
-      }
-    }
-    
-    return closestNode
-  }
-
-  /**
-   * Get all nodes within a certain distance of a point
-   */
-  getNodesWithinDistance(
-    lat: number, 
-    lon: number, 
-    maxDistance: number
-  ): GraphNode[] {
-    const nearbyNodes: GraphNode[] = []
-    
-    for (const node of this.graph.nodes.values()) {
-      const distance = haversineDistance(lat, lon, node.lat, node.lon)
-      if (distance <= maxDistance) {
-        nearbyNodes.push(node)
-      }
-    }
-    
-    return nearbyNodes
   }
 }
+
+/**
+ * Instance singleton du constructeur de graphe
+ */
+export const graphBuilder = new GraphBuilder()
