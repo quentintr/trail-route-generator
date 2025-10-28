@@ -1,0 +1,117 @@
+# Docker Compose pour l'environnement de développement
+# Ce fichier définit tous les services nécessaires pour le développement local
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL avec PostGIS pour les données géographiques
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: trail-routes-postgres
+    environment:
+      # Configuration de la base de données
+      POSTGRES_DB: trail_routes
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Active les extensions PostGIS
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      # Expose le port PostgreSQL pour les connexions externes
+      - "5432:5432"
+    volumes:
+      # Persistance des données de la base de données
+      - postgres_data:/var/lib/postgresql/data
+      # Scripts d'initialisation PostGIS
+      - ./server/scripts/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql
+    networks:
+      - trail-routes-network
+    restart: unless-stopped
+
+  # Cache Redis pour les sessions et le cache
+  redis:
+    image: redis:7-alpine
+    container_name: trail-routes-redis
+    ports:
+      # Expose le port Redis pour les connexions externes
+      - "6379:6379"
+    volumes:
+      # Persistance des données Redis
+      - redis_data:/data
+    networks:
+      - trail-routes-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Serveur backend Node.js
+  server:
+    build:
+      # Utilise le Dockerfile.dev à la racine du projet
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: trail-routes-server
+    ports:
+      # Expose le port du serveur backend
+      - "3000:3000"
+    volumes:
+      # Montage du code source pour le hot reload
+      - ./server:/app/server
+      - ./shared:/app/shared
+      # Préservation des node_modules pour éviter les conflits
+      - /app/node_modules
+      - /app/server/node_modules
+    environment:
+      # Variables d'environnement pour le développement
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/trail_routes
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+      - JWT_SECRET=dev-secret-key-change-in-production
+    depends_on:
+      # Le serveur attend que PostgreSQL et Redis soient prêts
+      - postgres
+      - redis
+    networks:
+      - trail-routes-network
+    restart: unless-stopped
+    # Commande pour démarrer le serveur avec hot reload
+    command: sh -c "cd server && npm run dev"
+
+  # Client frontend React + Vite
+  client:
+    build:
+      # Utilise le Dockerfile.dev du client
+      context: .
+      dockerfile: client/Dockerfile.dev
+    container_name: trail-routes-client
+    ports:
+      # Expose le port du serveur de développement Vite
+      - "5173:5173"
+    volumes:
+      # Montage du code source pour le hot reload
+      - ./client:/app/client
+      # Préservation des node_modules pour éviter les conflits
+      - /app/node_modules
+      - /app/client/node_modules
+    environment:
+      # Configuration Vite pour accepter les connexions externes
+      - VITE_API_URL=http://localhost:3000
+      - VITE_NODE_ENV=development
+    depends_on:
+      # Le client attend que le serveur soit prêt
+      - server
+    networks:
+      - trail-routes-network
+    restart: unless-stopped
+    # Commande pour démarrer Vite avec hot reload
+    command: sh -c "cd client && npm run dev -- --host 0.0.0.0"
+
+# Volumes nommés pour la persistance des données
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# Réseau personnalisé pour la communication entre services
+networks:
+  trail-routes-network:
+    driver: bridge

@@ -1,0 +1,67 @@
+# .dockerignore - Fichiers et dossiers à ignorer lors des builds Docker
+# Ce fichier optimise les builds en excluant les fichiers non nécessaires
+
+# Dépendances Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Fichiers de configuration Git
+.git/
+.gitignore
+
+# Fichiers d'environnement (contiennent des secrets)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Dossiers de build et de distribution
+dist/
+build/
+out/
+
+# Fichiers de logs
+*.log
+logs/
+
+# Fichiers temporaires
+.tmp/
+.temp/
+
+# Fichiers de cache
+.cache/
+.parcel-cache/
+
+# Fichiers de couverture de tests
+coverage/
+.nyc_output/
+
+# Fichiers IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+README.md
+*.md
+
+# Fichiers de test
+**/__tests__/
+**/*.test.*
+**/*.spec.*
+
+# Fichiers TypeScript compilés
+*.tsbuildinfo

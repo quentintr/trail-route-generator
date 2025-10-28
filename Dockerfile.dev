@@ -1,0 +1,26 @@
+# Dockerfile.dev pour le serveur backend
+# Utilise Node.js 18 Alpine pour un environnement léger et sécurisé
+FROM node:18-alpine
+
+# Définit le répertoire de travail dans le conteneur
+WORKDIR /app
+
+# Copie les fichiers package.json et package-lock.json
+# Cela permet de mettre en cache les dépendances si ces fichiers n'ont pas changé
+COPY package*.json ./
+
+# Installe toutes les dépendances npm
+# --frozen-lockfile garantit que package-lock.json est utilisé exactement
+RUN npm ci --frozen-lockfile
+
+# Copie tout le code source du serveur
+# L'ordre est important : d'abord les dépendances, puis le code source
+COPY server/ ./server/
+COPY shared/ ./shared/
+
+# Expose le port 3000 pour le serveur de développement
+EXPOSE 3000
+
+# Commande par défaut pour démarrer le serveur en mode développement
+# Le hot reload sera géré par les volumes dans docker-compose
+CMD ["npm", "run", "dev", "--prefix", "server"]
