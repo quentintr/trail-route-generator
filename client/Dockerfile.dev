@@ -1,0 +1,26 @@
+# Dockerfile.dev pour le client frontend (React + Vite)
+# Utilise Node.js 18 Alpine pour un environnement léger et sécurisé
+FROM node:18-alpine
+
+# Définit le répertoire de travail dans le conteneur
+WORKDIR /app
+
+# Copie les fichiers package.json et package-lock.json
+# Cela permet de mettre en cache les dépendances si ces fichiers n'ont pas changé
+COPY package*.json ./
+
+# Installe toutes les dépendances npm
+# --frozen-lockfile garantit que package-lock.json est utilisé exactement
+RUN npm ci --frozen-lockfile
+
+# Copie tout le code source du client
+# L'ordre est important : d'abord les dépendances, puis le code source
+COPY client/ ./client/
+
+# Expose le port 5173 pour le serveur de développement Vite
+# Vite utilise le port 5173 par défaut pour le hot reload
+EXPOSE 5173
+
+# Commande par défaut pour démarrer le serveur de développement Vite
+# Le hot reload sera géré par les volumes dans docker-compose
+CMD ["npm", "run", "dev", "--prefix", "client"]
