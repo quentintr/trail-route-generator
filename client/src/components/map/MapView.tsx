@@ -70,9 +70,26 @@ export const MapView: React.FC<MapViewProps> = ({
   // Convert route geometry to Leaflet format
   const routeCoordinates = selectedRoute?.geometry?.coordinates?.map(([lng, lat]) => [lat, lng] as [number, number]) || []
   
+  // Debug: Log coordinates to see what's happening
+  if (selectedRoute) {
+    console.log('MapView Debug:', {
+      routeId: selectedRoute.id,
+      originalCoordinates: selectedRoute.geometry?.coordinates?.slice(0, 3), // First 3 coordinates
+      convertedCoordinates: routeCoordinates.slice(0, 3), // First 3 converted coordinates
+      center: center,
+      startPoint: routeCoordinates[0],
+      endPoint: routeCoordinates[routeCoordinates.length - 1]
+    })
+  }
+  
   // Get start and end points
   const startPoint = routeCoordinates[0]
   const endPoint = routeCoordinates[routeCoordinates.length - 1]
+
+  // AFFICHAGE D'UNE ALERTE SI PAS DE POINTS
+  if (!routeCoordinates.length) {
+    alert('Problème : coordonnées de route VIDES ! (debug MapView)')
+  }
 
   if (isLoading) {
     return (
@@ -86,7 +103,7 @@ export const MapView: React.FC<MapViewProps> = ({
   }
 
   return (
-    <div className="w-full h-full relative">
+    <div style={{width: '100%', height: '100%'}}>
       <MapContainer
         center={center}
         zoom={zoom}
@@ -140,6 +157,11 @@ export const MapView: React.FC<MapViewProps> = ({
             {selectedRoute ? `${selectedRoute.distance}km • ${selectedRoute.duration}min` : 'No route selected'}
           </div>
         </div>
+      </div>
+      {/* Ajout debug visuel : centre et premier point */}
+      <div style={{position: 'absolute', bottom: 0, left: 0, background: '#fff', zIndex:999, fontSize:14, padding:4, border:'1px solid #ccc'}}>
+        <div>Centre carte (prop): {JSON.stringify(center)}</div>
+        <div>Premier point traj. (lat,lng): {routeCoordinates[0] ? routeCoordinates[0].join(', ') : 'aucun'}</div>
       </div>
     </div>
   )

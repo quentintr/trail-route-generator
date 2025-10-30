@@ -10,7 +10,7 @@ class ApiService {
     
     this.api = axios.create({
       baseURL: this.baseURL,
-      timeout: 10000,
+      timeout: 0, // Pas de timeout pour tester l'algorithme
       headers: {
         'Content-Type': 'application/json',
       },
