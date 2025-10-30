@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "nodemon src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "db:generate": "prisma generate",
@@ -19,7 +19,9 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0",
-    "lint:fix": "eslint . --ext ts --fix"
+    "lint:fix": "eslint . --ext ts --fix",
+    "cache:stats": "curl http://localhost:3001/api/admin/cache/stats",
+    "cache:clear": "curl -X DELETE http://localhost:3001/api/admin/cache"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -49,8 +51,9 @@
     "tsx": "^4.6.2",
     "typescript": "^5.3.3",
     "@jest/globals": "^29.7.0",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.1",
-    "@types/jest": "^29.5.8"
+    "nodemon": "^3.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "@types/jest": "^29.0.0"
   }
 }

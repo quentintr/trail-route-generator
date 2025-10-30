@@ -18,50 +18,98 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
   const [manualAddress, setManualAddress] = useState('')
   const { getCurrentPosition, isLoading, error } = useGeolocation()
 
-  // Update location when initialLocation changes
+  // Auto-detect location on component mount
   useEffect(() => {
-    if (initialLocation) {
-      setLocation(initialLocation)
+    const autoDetectLocation = async () => {
+      try {
+        const position = await getCurrentPosition()
+        if (position) {
+          const newLocation = {
+            lat: position.latitude,
+            lng: position.longitude,
+            address: `Position actuelle (${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)})`,
+          }
+          setLocation(newLocation)
+          onLocationChange?.(newLocation)
+        }
+      } catch (err) {
+        console.log('Auto-detection failed, user will need to set location manually')
+      }
     }
-  }, [initialLocation])
+
+    // Only auto-detect if no initial location is provided
+    if (!initialLocation) {
+      autoDetectLocation()
+    }
+  }, [initialLocation, getCurrentPosition, onLocationChange])
 
   const handleUseCurrentLocation = async () => {
     try {
       const position = await getCurrentPosition()
       if (position) {
+        console.log('GPS Position detected:', {
+          lat: position.latitude,
+          lng: position.longitude,
+          accuracy: position.accuracy
+        })
+        
+        // Vérifier si la position semble raisonnable (pas en Afrique si vous êtes à Toulouse)
+        const isReasonablePosition = position.latitude > 40 && position.latitude < 50 && 
+                                   position.longitude > -10 && position.longitude < 10
+        
+        if (!isReasonablePosition) {
+          console.warn('Position seems incorrect - might be VPN/proxy issue')
+          alert(`Attention: Votre position détectée (${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}) semble incorrecte. Cela peut être dû à un VPN ou à des paramètres réseau. Vous pouvez saisir manuellement vos coordonnées.`)
+        }
+        
         const newLocation = {
           lat: position.latitude,
           lng: position.longitude,
-          address: `Current Location (${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)})`,
+          address: `Position actuelle (${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)})`,
         }
         setLocation(newLocation)
         onLocationChange?.(newLocation)
       }
     } catch (err) {
       console.error('Error getting current location:', err)
+      alert('Erreur de géolocalisation. Veuillez autoriser l\'accès à votre position ou saisir manuellement vos coordonnées.')
     }
   }
 
   const handleManualSubmit = () => {
-    // Simple geocoding simulation - in real app, use a geocoding service
+    // Accepter les coordonnées au format "lat, lng" ou "lng, lat"
     const coords = manualAddress.split(',').map(coord => parseFloat(coord.trim()))
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+      // Détecter automatiquement si c'est lat,lng ou lng,lat
+      let lat, lng
+      if (Math.abs(coords[0]) <= 90 && Math.abs(coords[1]) <= 180) {
+        // Premier nombre <= 90, donc probablement lat,lng
+        lat = coords[0]
+        lng = coords[1]
+      } else {
+        // Sinon, probablement lng,lat
+        lng = coords[0]
+        lat = coords[1]
+      }
+      
       const newLocation = {
-        lat: coords[0],
-        lng: coords[1],
-        address: manualAddress,
+        lat: lat,
+        lng: lng,
+        address: `Coordonnées manuelles (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
       }
       setLocation(newLocation)
       onLocationChange?.(newLocation)
+      setIsManualInput(false)
     } else {
-      // For demo purposes, use Paris coordinates
+      // Si ce n'est pas des coordonnées, essayer de géocoder (simulation)
       const newLocation = {
-        lat: 48.8566,
-        lng: 2.3522,
-        address: manualAddress || 'Paris, France',
+        lat: 43.6047, // Toulouse par défaut si pas de coordonnées valides
+        lng: 1.4442,
+        address: manualAddress || 'Toulouse, France',
       }
       setLocation(newLocation)
       onLocationChange?.(newLocation)
+      setIsManualInput(false)
     }
   }
 
@@ -94,11 +142,14 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
         <div className="space-y-2">
           <input
             type="text"
-            placeholder="Enter address or coordinates (lat, lng)"
+            placeholder="Ex: 43.6047, 1.4442 ou Toulouse"
             value={manualAddress}
             onChange={(e) => setManualAddress(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
+          <div className="text-xs text-gray-500">
+            Saisissez vos coordonnées GPS (latitude, longitude) ou une ville
+          </div>
           <button
             type="button"
             onClick={handleManualSubmit}

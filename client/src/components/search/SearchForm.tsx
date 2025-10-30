@@ -43,9 +43,9 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onRouteGenerated }) => {
       pace: '5:00',
       terrain_type: 'mixed',
       location: {
-        lat: 48.8566,
-        lng: 2.3522,
-        address: 'Paris, France',
+        lat: 0, // Pas de position par défaut
+        lng: 0,
+        address: 'Cliquez sur "Use my current location"',
       },
     },
   })

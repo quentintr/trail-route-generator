@@ -12,45 +12,32 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler'
 import authRoutes from './routes/auth'
 import trailRoutes from './routes/trails'
 import routeRoutes from './routes/routes'
+import adminRouter from './routes/admin'
 import apiV1AuthRoutes from './routes/api/v1/auth'
 
 // Load environment variables
 dotenv.config()
 
 const app = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 3001
 
 // Middleware
 app.use(helmet())
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || ['http://localhost:3000', 'http://localhost:5173'],
-  credentials: true
-}))
-app.use(morgan('combined'))
-app.use(express.json({ limit: '10mb' }))
+app.use(cors())
+app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+app.use(morgan('combined'))
 
 // Health check with PostGIS status
-app.get('/health', async (req, res) => {
-  try {
-    const health = await healthCheck()
-    res.json({ 
-      ...health,
-      uptime: process.uptime()
-    })
-  } catch (error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: 'Health check failed',
-      timestamp: new Date().toISOString()
-    })
-  }
+app.get('/health', (req, res) => {
+  res.json({ status:'ok', timestamp: new Date().toISOString() })
 })
 
 // API Routes
 app.use('/api/auth', authRoutes)
 app.use('/api/trails', trailRoutes)
 app.use('/api/routes', routeRoutes)
+app.use('/api/admin', adminRouter)
 
 // API v1 Routes
 app.use('/api/v1/auth', apiV1AuthRoutes)
@@ -67,11 +54,8 @@ const startServer = async () => {
     // Connect to database with PostGIS
     await connectDatabase()
     
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`)
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
-      console.log(`🗄️  Database: Connected with PostGIS support`)
-      console.log(`🌍 Geographic queries: Enabled`)
+    app.listen(PORT, ()=>{
+      console.log(`🚀 Server running on http://localhost:${PORT}`)
     })
   } catch (error) {
     console.error('❌ Failed to start server:', error)

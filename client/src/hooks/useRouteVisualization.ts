@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Route } from '../types/route'
 
 interface UseRouteVisualizationReturn {
@@ -18,12 +18,17 @@ export const useRouteVisualization = (routes: Route[]): UseRouteVisualizationRet
   // Calculate center point from route geometry
   const calculateRouteCenter = useCallback((route: Route): [number, number] => {
     if (!route.geometry || !route.geometry.coordinates || route.geometry.coordinates.length === 0) {
+      console.log('No geometry found, using default center')
       return [48.8566, 2.3522] // Default to Paris
     }
 
     const coordinates = route.geometry.coordinates
+    console.log('Calculating route center from coordinates:', coordinates.slice(0, 3))
+    
     if (coordinates.length === 1) {
-      return [coordinates[0][1], coordinates[0][0]] // [lat, lng]
+      const center: [number, number] = [coordinates[0][1], coordinates[0][0]] // [lat, lng]
+      console.log('Single coordinate center:', center)
+      return center
     }
 
     // Calculate bounds
@@ -40,7 +45,9 @@ export const useRouteVisualization = (routes: Route[]): UseRouteVisualizationRet
     })
 
     // Return center point
-    return [(minLat + maxLat) / 2, (minLng + maxLng) / 2]
+    const center: [number, number] = [(minLat + maxLat) / 2, (minLng + maxLng) / 2]
+    console.log('Calculated route center:', center, 'from bounds:', { minLat, maxLat, minLng, maxLng })
+    return center
   }, [])
 
   // Calculate appropriate zoom level for route bounds
@@ -99,14 +106,15 @@ export const useRouteVisualization = (routes: Route[]): UseRouteVisualizationRet
     setMapZoom(13)
   }, [])
 
-  // Update selected route when routes array changes
-  useMemo(() => {
-    if (routes.length > 0 && (!selectedRoute || !routes.find(r => r.id === selectedRoute.id))) {
-      setSelectedRoute(routes[0])
-      const center = calculateRouteCenter(routes[0])
+  // Ajoute un effet : recalcule automatiquement le centre et le zoom à chaque changement de route sélectionnée.
+  useEffect(() => {
+    if (selectedRoute) {
+      const center = calculateRouteCenter(selectedRoute)
+      const zoom = calculateRouteZoom(selectedRoute)
       setMapCenter(center)
+      setMapZoom(zoom)
     }
-  }, [routes, selectedRoute, calculateRouteCenter])
+  }, [selectedRoute, calculateRouteCenter, calculateRouteZoom])
 
   return {
     selectedRoute,

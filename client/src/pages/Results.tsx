@@ -37,6 +37,33 @@ export const Results: React.FC<ResultsProps> = ({
     zoomToRoute,
   } = useRouteVisualization(routes)
 
+  // Debug: Log route data to see coordinates
+  if (routes.length > 0) {
+    console.log('=== ROUTE DEBUG ===')
+    routes.forEach((route, index) => {
+      console.log(`Route ${index + 1}:`, {
+        id: route.id,
+        name: route.name,
+        distance: route.distance,
+        geometry: route.geometry ? {
+          type: route.geometry.type,
+          coordinatesCount: route.geometry.coordinates?.length || 0,
+          firstCoordinate: route.geometry.coordinates?.[0],
+          lastCoordinate: route.geometry.coordinates?.[route.geometry.coordinates.length - 1]
+        } : 'No geometry',
+        waypoints: route.waypoints?.map(wp => ({
+          name: wp.name,
+          lat: wp.latitude,
+          lng: wp.longitude
+        }))
+      })
+    })
+    console.log('Map center:', mapCenter)
+    console.log('Map zoom:', mapZoom)
+    console.log('Selected route:', selectedRoute?.id)
+    console.log('==================')
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 p-4">
@@ -139,6 +166,11 @@ export const Results: React.FC<ResultsProps> = ({
                 center={mapCenter}
                 zoom={mapZoom}
               />
+            </div>
+            {/* DEBUG VISUEL: AFFICHAGE COORDONNEES */}
+            <div style={{fontSize:14, background: '#fafafa', border: '1px solid #ccf', marginTop: 8, padding: 6}}>
+              Centre carte (hook): {JSON.stringify(mapCenter)}<br/>
+              Premier point du trajet (brut): {selectedRoute?.geometry?.coordinates?.[0] ? JSON.stringify(selectedRoute.geometry.coordinates[0]) : 'aucun'}
             </div>
 
             {/* Route Details */}
