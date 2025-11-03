@@ -6,20 +6,12 @@ FROM node:18-alpine
 RUN apk add --no-cache openssl
 
 # Définit le répertoire de travail dans le conteneur
-WORKDIR /app
+WORKDIR /app/server
 
 # Copie les fichiers package.json et package-lock.json à la racine
-COPY package*.json ./
-
-# Copie les fichiers package.json des sous-projets
-COPY server/package*.json ./server/
-COPY shared/package*.json ./shared/
+COPY server/package*.json ./
 
 # Installe les dépendances à la racine
-RUN npm install
-
-# Installe les dépendances du serveur
-WORKDIR /app/server
 RUN npm install
 
 # Copie le schéma Prisma pour générer le client
@@ -28,16 +20,13 @@ COPY server/prisma/ ./prisma/
 # Génère le client Prisma
 RUN npx prisma generate
 
-# Retourne à la racine
-WORKDIR /app
-
 # Copie tout le code source
-COPY server/ ./server/
-COPY shared/ ./shared/
+COPY server/ ./
+COPY shared/ ../shared/
 
 # Expose le port 3000 pour le serveur de développement
 EXPOSE 3000
 
 # Commande par défaut pour démarrer le serveur en mode développement
 # Le hot reload sera géré par les volumes dans docker-compose
-CMD ["npm", "run", "dev", "--prefix", "server"]
+CMD ["npm", "run", "dev"]

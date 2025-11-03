@@ -37,7 +37,10 @@ export const useRouteVisualization = (routes: Route[]): UseRouteVisualizationRet
     let minLng = coordinates[0][0]
     let maxLng = coordinates[0][0]
 
-    coordinates.forEach(([lng, lat]) => {
+    coordinates.forEach((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) return
+      const [lng, lat] = coord
+      if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
       minLng = Math.min(minLng, lng)
@@ -67,7 +70,10 @@ export const useRouteVisualization = (routes: Route[]): UseRouteVisualizationRet
     let minLng = coordinates[0][0]
     let maxLng = coordinates[0][0]
 
-    coordinates.forEach(([lng, lat]) => {
+    coordinates.forEach((coord) => {
+      if (!Array.isArray(coord) || coord.length < 2) return
+      const [lng, lat] = coord
+      if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
       minLng = Math.min(minLng, lng)

@@ -48,22 +48,21 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     container_name: trail-routes-server
+    working_dir: /app/server
     ports:
       # Expose le port du serveur backend
-      - "3000:3000"
+      - "3001:3001"
     volumes:
       # Montage du code source pour le hot reload
       - ./server:/app/server
-      - ./shared:/app/shared
-      # Préservation des node_modules pour éviter les conflits
-      - /app/node_modules
       - /app/server/node_modules
+      - ./shared:/app/shared
     environment:
       # Variables d'environnement pour le développement
       - NODE_ENV=development
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/trail_routes
       - REDIS_URL=redis://redis:6379
-      - PORT=3000
+      - PORT=3001
       - JWT_SECRET=dev-secret-key-change-in-production
     depends_on:
       # Le serveur attend que PostgreSQL et Redis soient prêts
@@ -73,7 +72,7 @@ services:
       - trail-routes-network
     restart: unless-stopped
     # Commande pour démarrer le serveur avec hot reload
-    command: sh -c "cd server && npm run dev"
+    command: npm run dev
 
   # Client frontend React + Vite
   client:
@@ -84,16 +83,13 @@ services:
     container_name: trail-routes-client
     ports:
       # Expose le port du serveur de développement Vite
-      - "5173:5173"
+      - "8181:8181"
     volumes:
       # Montage du code source pour le hot reload
       - ./client:/app/client
-      # Préservation des node_modules pour éviter les conflits
-      - /app/node_modules
-      - /app/client/node_modules
     environment:
       # Configuration Vite pour accepter les connexions externes
-      - VITE_API_URL=http://localhost:3000
+      - VITE_API_URL=http://localhost:3001
       - VITE_NODE_ENV=development
     depends_on:
       # Le client attend que le serveur soit prêt
@@ -102,7 +98,7 @@ services:
       - trail-routes-network
     restart: unless-stopped
     # Commande pour démarrer Vite avec hot reload
-    command: sh -c "cd client && npm run dev -- --host 0.0.0.0"
+    command: sh -c "cd client && npm run build && npm run preview -- --host 0.0.0.0 --port 8181"
 
 # Volumes nommés pour la persistance des données
 volumes:

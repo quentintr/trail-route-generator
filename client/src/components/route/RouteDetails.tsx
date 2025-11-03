@@ -6,13 +6,15 @@ interface RouteDetailsProps {
   route: Route | null
 }
 
-const formatDuration = (minutes: number): string => {
+const formatDuration = (minutes: number | undefined): string => {
+  if (minutes === undefined || minutes === null || isNaN(minutes)) return '-'
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
   return hours > 0 ? `${hours}h ${mins}min` : `${mins}min`
 }
 
-const formatElevation = (meters: number): string => {
+const formatElevation = (meters: number | undefined): string => {
+  if (meters === undefined || meters === null || isNaN(meters)) return '-'
   if (meters >= 1000) {
     return `${(meters / 1000).toFixed(2)}km`
   }
@@ -50,6 +52,8 @@ const getTerrainIcon = (terrain: string) => {
 // Mock elevation data for the chart
 const generateElevationData = (route: Route) => {
   if (!route.geometry?.coordinates) return []
+  if (route.distance === undefined || route.distance === null || isNaN(route.distance)) return []
+  if (route.elevation === undefined || route.elevation === null || isNaN(route.elevation)) return []
   
   const coordinates = route.geometry.coordinates
   const data = coordinates.map((_coord, index) => ({
@@ -80,12 +84,14 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({ route }) => {
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">{route.name}</h2>
         <div className="flex items-center space-x-4">
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getDifficultyColor(route.difficulty)}`}>
-            {route.difficulty.charAt(0).toUpperCase() + route.difficulty.slice(1)}
+          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getDifficultyColor(route.difficulty ?? '-')}`}>
+            {(route.difficulty && typeof route.difficulty === 'string' && route.difficulty.length > 0)
+              ? route.difficulty.charAt(0).toUpperCase() + route.difficulty.slice(1)
+              : '-'}
           </span>
           <div className="flex items-center space-x-2">
-            <span className="text-lg">{getTerrainIcon(route.terrain_type)}</span>
-            <span className="text-sm text-gray-600 capitalize">{route.terrain_type}</span>
+            <span className="text-lg">{getTerrainIcon(route.terrain_type ?? '')}</span>
+            <span className="text-sm text-gray-600 capitalize">{route.terrain_type ?? '-'}</span>
           </div>
         </div>
       </div>
@@ -93,7 +99,15 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({ route }) => {
       {/* Route Statistics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="text-center p-3 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-indigo-600">{route.distance}</div>
+          <div className="text-2xl font-bold text-indigo-600">
+            {route.distance !== undefined && route.distance !== null 
+              ? typeof route.distance === 'number' 
+                ? route.distance >= 1000 
+                  ? `${(route.distance / 1000).toFixed(2)}`
+                  : route.distance.toFixed(2)
+                : route.distance
+              : '-'}
+          </div>
           <div className="text-sm text-gray-500">Distance (km)</div>
         </div>
         <div className="text-center p-3 bg-gray-50 rounded-lg">
@@ -106,7 +120,11 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({ route }) => {
         </div>
         <div className="text-center p-3 bg-gray-50 rounded-lg">
           <div className="text-2xl font-bold text-purple-600">
-            {(route.distance / (route.duration / 60)).toFixed(1)}
+            {route.distance !== undefined && route.duration !== undefined && 
+             route.distance !== null && route.duration !== null &&
+             !isNaN(route.distance) && !isNaN(route.duration) && route.duration > 0
+              ? ((route.distance / 1000) / (route.duration / 60)).toFixed(1)
+              : '-'}
           </div>
           <div className="text-sm text-gray-500">Avg Speed (km/h)</div>
         </div>
@@ -158,7 +176,10 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({ route }) => {
               <div className="flex-1">
                 <div className="font-medium text-gray-900">{waypoint.name || `Waypoint ${index + 1}`}</div>
                 <div className="text-sm text-gray-500">
-                  {waypoint.latitude.toFixed(4)}, {waypoint.longitude.toFixed(4)}
+                  {waypoint.latitude !== undefined && waypoint.longitude !== undefined &&
+                   !isNaN(waypoint.latitude) && !isNaN(waypoint.longitude)
+                    ? `${waypoint.latitude.toFixed(4)}, ${waypoint.longitude.toFixed(4)}`
+                    : 'Coordinates not available'}
                 </div>
               </div>
             </div>
@@ -174,8 +195,8 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({ route }) => {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="text-lg">{getTerrainIcon(route.terrain_type)}</span>
-              <span className="capitalize">{route.terrain_type}</span>
+              <span className="text-lg">{getTerrainIcon(route.terrain_type ?? '')}</span>
+              <span className="capitalize">{route.terrain_type ?? '-'}</span>
             </div>
             <span className="text-sm text-gray-500">100%</span>
           </div>

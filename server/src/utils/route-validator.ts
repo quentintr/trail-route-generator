@@ -1,5 +1,5 @@
-import { Graph } from '../services/graph-builder'
-import { GeneratedLoop } from '../algorithms/loop-generator'
+import { Graph } from '../services/graph-builder.js'
+import { GeneratedLoop } from '../algorithms/loop-generator.js'
 export interface ValidationResult {
   valid: boolean
   errors: string[]

@@ -31,16 +31,22 @@ export function MapDebugLayer({ enabled, data }: Props) {
       }
       // Edges
       for (const edge of Object.values(data.graph.edges||{})) {
-        const fromNode = data.graph.nodes[edge.from]
-        const toNode = data.graph.nodes[edge.to]
+        const fromNode = data.graph.nodes.get(edge.from);
+        const toNode = data.graph.nodes.get(edge.to);
         if (fromNode && toNode) {
           const polyline = L.polyline([
             [fromNode.lat, fromNode.lon],[toNode.lat, toNode.lon]
           ],{
             color:'gray',weight:1,opacity:0.3
           }).addTo(map)
+          const distanceText = edge.distance !== undefined && !isNaN(edge.distance) 
+            ? `${edge.distance.toFixed(0)}m` 
+            : 'N/A'
+          const qualityText = edge.qualityScore !== undefined && !isNaN(edge.qualityScore)
+            ? edge.qualityScore.toFixed(0)
+            : 'N/A'
           polyline.bindTooltip(
-            `Way ${edge.osmWayId}<br/>Distance: ${edge.distance.toFixed(0)}m<br/>Quality: ${edge.qualityScore.toFixed(0)}`
+            `Way ${edge.osmWayId || 'N/A'}<br/>Distance: ${distanceText}<br/>Quality: ${qualityText}`
           )
           layers.push(polyline)
         }

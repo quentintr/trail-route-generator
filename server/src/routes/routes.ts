@@ -1,13 +1,14 @@
 import express from 'express'
 import { z } from 'zod'
 import { PrismaClient } from '@prisma/client'
-import { osrmService } from '../services/osrm-service'
+import { osrmService } from '../services/osrm-service.js'
 import { RouteGenerationRequest, RouteGenerationResponse } from '@trail-route-generator/shared/types'
-import { buildGraph, validateGraph } from '../services/graph-builder'
-import { generateLoops } from '../algorithms/loop-generator'
-import * as GraphCache from '../services/graph-cache'
-import { osmService } from '../services/osm-service'
-import { routingService } from '../services/routing-service'
+import { buildGraph, validateGraph } from '../services/graph-builder.js'
+import { generateLoops } from '../algorithms/loop-generator.js'
+import * as GraphCache from '../services/graph-cache.js'
+import { osmService } from '../services/osm-service.js'
+import { routingService } from '../services/routing-service.js'
+import { ensureOSMFormat, detectFormat } from '../utils/format-adapter.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -374,30 +375,52 @@ router.post('/generate', async (req, res) => {
       console.log(`📊 Loading OSM graph (radius: ${radius.toFixed(1)} km)...`)
       const cacheKey = GraphCache.hashArea(start_lat, start_lon, radius)
       let cached = await GraphCache.loadGraph(cacheKey)
-      let graph = cached ? cached.graph : null
-      if (!graph) {
-        console.log('   Cache MISS - Building from OSM...')
-        // Utiliser le service OSM enrichi
-        const osmData = await osmService.getRunningPaths(
-          {
-            north: start_lat + radius / 111,
-            south: start_lat - radius / 111,
-            east: start_lon + radius / (111 * Math.cos(start_lat * Math.PI / 180)),
-            west: start_lon - radius / (111 * Math.cos(start_lat * Math.PI / 180)),
-          },
-          { includeSecondary: true }
-        )
-        graph = buildGraph(osmData, { lat: start_lat, lon: start_lon }, radius)
-        await GraphCache.saveGraph(cacheKey, {
-          area: { lat: start_lat, lon: start_lon, radius },
-          graph,
-          osmDataVersion: 'unknown',
-          createdAt: new Date().toISOString(),
-          nodesCount: graph.nodes.size,
-          edgesCount: graph.edges.size
-        })
+      let graph = cached ? cached.graph : null;
+      // Correction : si le cache a désérialisé en objet brut, retransformer en Map
+      if(graph && !(graph.edges instanceof Map)) {
+        graph.edges = new Map(Object.entries(graph.edges));
+      }
+      if(graph && !(graph.nodes instanceof Map)) {
+        graph.nodes = new Map(Object.entries(graph.nodes));
+      }
+      if (!graph || graph.nodes.size === 0 || graph.edges.size === 0) {
+        if (graph && (graph.nodes.size === 0 || graph.edges.size === 0)) {
+          console.warn(`   ⚠️  Cache contains empty graph (nodes=${graph.nodes.size}, edges=${graph.edges.size}) - rebuilding...`)
+          graph = null
+        }
+        if (!graph) {
+          console.log('   Cache MISS - Building from OSM...')
+          // Utiliser le service OSM enrichi
+          const osmData = await osmService.getRunningPaths(
+            {
+              north: start_lat + radius / 111,
+              south: start_lat - radius / 111,
+              east: start_lon + radius / (111 * Math.cos(start_lat * Math.PI / 180)),
+              west: start_lon - radius / (111 * Math.cos(start_lat * Math.PI / 180)),
+            },
+            { includeSecondary: true }
+          )
+          const safeOsmData = ensureOSMFormat(osmData)
+          graph = buildGraph(safeOsmData)
+          
+          // Ne sauvegarder que si le graphe n'est pas vide
+          if (graph.nodes.size > 0 && graph.edges.size > 0) {
+            await GraphCache.saveGraph(cacheKey, {
+              area: { lat: start_lat, lon: start_lon, radius },
+              graph,
+              osmDataVersion: 'unknown',
+              createdAt: new Date().toISOString(),
+              nodesCount: graph.nodes.size,
+              edgesCount: graph.edges.size
+            })
+            console.log(`   ✅ Graph cached (${graph.nodes.size} nodes, ${graph.edges.size} edges)`)
+          } else {
+            console.warn(`   ⚠️  Empty graph generated (nodes=${graph.nodes.size}, edges=${graph.edges.size}) - NOT cached`)
+            throw new Error(`No OSM data found in area (${start_lat}, ${start_lon}) with radius ${radius}km. Please try a different location.`)
+          }
+        }
       } else {
-        console.log('   Cache HIT - Graph loaded from cache')
+        console.log(`   Cache HIT - Graph loaded from cache (${graph.nodes.size} nodes, ${graph.edges.size} edges)`)
       }
 
       // Valider graphe
@@ -406,8 +429,10 @@ router.post('/generate', async (req, res) => {
         console.error(`❌ Invalid graph:`, validation.errors)
         throw new Error('Graph validation failed: ' + validation.errors.join(', '))
       }
-      if (validation.warnings.length > 0) {
+      if (validation.warnings && validation.warnings.length > 0) {
         console.warn(`⚠️  Graph warnings:`, validation.warnings)
+      } else if (!validation.warnings) {
+        console.warn('[routes.ts] validation.warnings absent ou undefined:', validation)
       }
       console.log(`✅ Graph validated: nodes=${graph.nodes.size}, edges=${graph.edges.size}`)
       // Générer les boucles
@@ -424,36 +449,45 @@ router.post('/generate', async (req, res) => {
       return res.json({
         success: true,
         method: 'custom_algorithm',
-        routes: loops,
-        debug: {
-          ...debug,
-          timings: { total: totalTime },
-          graph: { nodes: graph.nodes.size, edges: graph.edges.size, validation }
-        }
-      })
+        routes: loops.map((loop, i) => {
+          // Construire les coordonnées depuis les nœuds du loop
+          const coordinates = Array.isArray(loop.loop) && loop.loop.length >= 2
+            ? loop.loop.map(lid => {
+                const n = graph.nodes.get(lid);
+                return n ? [n.lon, n.lat] : undefined;
+              }).filter((coord): coord is [number, number] => coord !== undefined)
+            : []
+          
+          return {
+            id: `custom_${i}_${Date.now()}`,
+            name: `Boucle ${i + 1}`,
+            distance: loop.distance || 0,
+            geometry: {
+              type: 'LineString' as const,
+              coordinates
+            },
+            waypoints: coordinates.length > 0 ? [
+              { lat: coordinates[0][1], lon: coordinates[0][0], type: 'start' },
+              { lat: coordinates[coordinates.length - 1][1], lon: coordinates[coordinates.length - 1][0], type: 'end' }
+            ] : [],
+            quality_score: loop.qualityScore || 0,
+            pathEdges: loop.pathEdges || [],
+            debug: loop.debug
+          }
+        }),
+        debug,
+        timing: totalTime
+      });
     } catch (customError) {
-      console.error(`❌ Custom algorithm failed:`, customError)
-      console.log('🔄 Falling back to OSRM...')
-      try {
-        // Simple fallback: OSRM circular
-        const numWaypoints = 8
-        const waypoints: [number, number][] = [[start_lon, start_lat]]
-        for (let i = 0; i < numWaypoints; i++) {
-          const angle = (i / numWaypoints) * 2 * Math.PI
-          const offsetKm = distance * 0.4
-          const lat = start_lat + (offsetKm / 111) * Math.cos(angle)
-          const lon = start_lon + (offsetKm / (111 * Math.cos(start_lat * Math.PI / 180))) * Math.sin(angle)
-          waypoints.push([lon, lat])
-        }
-        waypoints.push([start_lon, start_lat])
-        const route = await routingService.calculateRouteWithWaypoints(waypoints, { profile: 'foot' })
-        return res.json({ success:true, method: 'osrm_fallback', routes: [route], debug: { fallback: 'osrm' } })
-      } catch (osrmError) {
-        return res.status(500).json({success:false, error:'Both custom and OSRM methods failed'})
-      }
+      console.error(customError);
+      const errorMessage = customError instanceof Error ? customError.message : String(customError);
+      return res.status(500).json({ error: "Erreur dans l'algorithme de génération de boucles (custom)", details: errorMessage });
     }
-  } catch (error:any) {
-    return res.status(500).json({ success:false, error: error.message, details: error.stack })
+  } catch (error) {
+    console.error('Generate route error:', error)
+    res.status(500).json({
+      error: 'Erreur lors de la génération de l\'itinéraire'
+    })
   }
 })
 

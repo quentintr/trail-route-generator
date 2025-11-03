@@ -9,13 +9,15 @@ interface RouteCardProps {
   onSave?: (route: Route) => void
 }
 
-const formatDuration = (minutes: number): string => {
+const formatDuration = (minutes: number | undefined): string => {
+  if (minutes === undefined || minutes === null || isNaN(minutes)) return '-'
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
   return hours > 0 ? `${hours}h ${mins}min` : `${mins}min`
 }
 
-const formatElevation = (meters: number): string => {
+const formatElevation = (meters: number | undefined): string => {
+  if (meters === undefined || meters === null || isNaN(meters)) return '-'
   if (meters >= 1000) {
     return `${(meters / 1000).toFixed(2)}km`
   }
@@ -86,15 +88,25 @@ export const RouteCard: React.FC<RouteCardProps> = ({
         <h3 className="text-lg font-semibold text-gray-900 truncate">
           {route.name}
         </h3>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor(route.difficulty)}`}>
-          {route.difficulty.charAt(0).toUpperCase() + route.difficulty.slice(1)}
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getDifficultyColor(route.difficulty ?? '-')}`}>
+          {(route.difficulty && typeof route.difficulty === 'string' && route.difficulty.length > 0)
+            ? route.difficulty.charAt(0).toUpperCase() + route.difficulty.slice(1)
+            : '-'}
         </span>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-4">
         <div className="text-center">
-          <div className="text-2xl font-bold text-indigo-600">{route.distance}</div>
+          <div className="text-2xl font-bold text-indigo-600">
+            {route.distance !== undefined && route.distance !== null 
+              ? typeof route.distance === 'number' 
+                ? route.distance >= 1000 
+                  ? `${(route.distance / 1000).toFixed(2)}`
+                  : route.distance.toFixed(2)
+                : route.distance
+              : '-'}
+          </div>
           <div className="text-xs text-gray-500">km</div>
         </div>
         <div className="text-center">
@@ -110,8 +122,8 @@ export const RouteCard: React.FC<RouteCardProps> = ({
       {/* Terrain */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
-          <span className="text-lg">{getTerrainIcon(route.terrain_type)}</span>
-          <span className="text-sm text-gray-600 capitalize">{route.terrain_type}</span>
+          <span className="text-lg">{getTerrainIcon(route.terrain_type ?? '')}</span>
+          <span className="text-sm text-gray-600 capitalize">{route.terrain_type ?? '-'}</span>
         </div>
         <div className="text-xs text-gray-500">
           Surface

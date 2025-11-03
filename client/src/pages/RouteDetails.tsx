@@ -133,7 +133,10 @@ export const RouteDetails = () => {
                             {waypoint.name || `Point ${index + 1}`}
                           </p>
                           <p className="text-sm text-gray-500">
-                            {waypoint.latitude.toFixed(6)}, {waypoint.longitude.toFixed(6)}
+                            {waypoint.latitude !== undefined && waypoint.longitude !== undefined &&
+                             !isNaN(waypoint.latitude) && !isNaN(waypoint.longitude)
+                              ? `${waypoint.latitude.toFixed(6)}, ${waypoint.longitude.toFixed(6)}`
+                              : 'Coordinates not available'}
                           </p>
                         </div>
                       </div>

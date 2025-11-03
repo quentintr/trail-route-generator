@@ -601,6 +601,68 @@ export class OSMService {
   }
 }
 
+export function calculateWayQualityScore(tags: Record<string,string>): number {
+  let score = 0;
+  switch(tags.surface) {
+    case 'paved':
+    case 'asphalt':
+    case 'concrete': score+=10; break;
+    case 'compacted':
+    case 'gravel': score +=8; break;
+    case 'ground':
+    case 'dirt': score+=6; break;
+    case 'grass': score+=5; break;
+    case 'sand':
+    case 'mud': score+=3; break;
+    default: score+=7;
+  }
+  switch(tags.highway) {
+    case 'footway':
+    case 'pedestrian': score+=5; break;
+    case 'path':
+    case 'track': score+=4; break;
+    case 'cycleway': score+=3; break;
+    case 'residential':
+    case 'living_street': score+=2; break;
+  }
+  switch(tags.smoothness) {
+    case 'excellent': score+=3; break;
+    case 'good': score+=2; break;
+    case 'intermediate': score+=1; break;
+  }
+  if(tags.width) {
+    const w = parseFloat(tags.width); if(w>=3) score+=2; else if(w>=2) score+=1;
+  }
+  if(tags.lit==='yes') score+=1;
+  if(tags.natural==='forest') score+=3; else if(tags.natural==='wood') score+=2; else if(tags.natural) score+=1;
+  if(tags.leisure==='park') score+=2;
+  return Math.min(score,30);
+}
+export async function getWalkablePathsEnriched(lat:number, lon:number, radiusKm:number):Promise<OSMResponse> {
+  // requête Overpass similaire, mais enrichie
+  const query = `
+    [out:json][timeout:30];
+    (
+      way(around:${radiusKm * 1000},${lat},${lon})
+        ["highway"~"^(footway|path|track|cycleway|pedestrian|steps|residential|living_street|service)$"]
+        ["access"!="private"]
+        ["access"!="no"];
+      way(around:${radiusKm * 1000},${lat},${lon})
+        ["leisure"="park"];
+      way(around:${radiusKm * 1000},${lat},${lon})
+        ["natural"];
+    );
+    (._;>;); out body;`;
+  const resp = await axios.post('https://overpass-api.de/api/interpreter', query, {headers:{'Content-Type': 'text/plain'}});
+  const data:OSMResponse = resp.data;
+  // enrichissement qualité sur chaque way
+  for(const el of data.elements) {
+    if(el.type==='way')
+      (el as any).qualityScore = calculateWayQualityScore(el.tags||{});
+  }
+  return data;
+}
+
 /**
  * Instance singleton du service OSM
  */
@@ -646,3 +708,6 @@ export const osmUtils = {
     }
   }
 }
+
+// exports nécessaires pour ESM compliance
+export * from './osm-service.js';

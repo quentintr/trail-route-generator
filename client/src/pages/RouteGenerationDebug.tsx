@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { MapContainer, TileLayer } from 'react-leaflet'
 import { MapDebugLayer } from '../components/map/MapDebugLayer'
 

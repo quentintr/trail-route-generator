@@ -44,15 +44,29 @@ const MapUpdater: React.FC<{ route: Route | null }> = ({ route }) => {
       const coordinates = route.geometry.coordinates
       if (coordinates.length > 1) {
         // Convert coordinates to LatLng format for Leaflet
-        const latLngs = coordinates.map(([lng, lat]) => [lat, lng] as [number, number])
+        const latLngs = coordinates
+          .filter((coord): coord is [number, number] => 
+            Array.isArray(coord) && 
+            coord.length >= 2 && 
+            typeof coord[0] === 'number' && 
+            typeof coord[1] === 'number' &&
+            !isNaN(coord[0]) &&
+            !isNaN(coord[1])
+          )
+          .map(([lng, lat]) => [lat, lng] as [number, number])
         
         // Create bounds and fit map to route
         const bounds = L.latLngBounds(latLngs)
         map.fitBounds(bounds, { padding: [20, 20] })
       } else if (coordinates.length === 1) {
         // Single point - center on it
-        const [lng, lat] = coordinates[0]
-        map.setView([lat, lng], 15)
+        const coord = coordinates[0]
+        if (Array.isArray(coord) && coord.length >= 2 && 
+            typeof coord[0] === 'number' && typeof coord[1] === 'number' &&
+            !isNaN(coord[0]) && !isNaN(coord[1])) {
+          const [lng, lat] = coord
+          map.setView([lat, lng], 15)
+        }
       }
     }
   }, [route, map])
@@ -68,7 +82,16 @@ export const MapView: React.FC<MapViewProps> = ({
   showZoomControls = true,
 }) => {
   // Convert route geometry to Leaflet format
-  const routeCoordinates = selectedRoute?.geometry?.coordinates?.map(([lng, lat]) => [lat, lng] as [number, number]) || []
+  const routeCoordinates = selectedRoute?.geometry?.coordinates
+    ?.filter((coord): coord is [number, number] => 
+      Array.isArray(coord) && 
+      coord.length >= 2 && 
+      typeof coord[0] === 'number' && 
+      typeof coord[1] === 'number' &&
+      !isNaN(coord[0]) &&
+      !isNaN(coord[1])
+    )
+    ?.map(([lng, lat]) => [lat, lng] as [number, number]) || []
   
   // Debug: Log coordinates to see what's happening
   if (selectedRoute) {
@@ -154,14 +177,32 @@ export const MapView: React.FC<MapViewProps> = ({
       <div className="absolute top-4 right-4 z-[1000]">
         <div className="bg-white rounded-lg shadow-lg p-2">
           <div className="text-sm text-gray-600">
-            {selectedRoute ? `${selectedRoute.distance}km • ${selectedRoute.duration}min` : 'No route selected'}
+            {selectedRoute ? (
+              <>
+                {selectedRoute.distance !== undefined && selectedRoute.distance !== null 
+                  ? typeof selectedRoute.distance === 'number'
+                    ? selectedRoute.distance >= 1000
+                      ? `${(selectedRoute.distance / 1000).toFixed(2)}km`
+                      : `${selectedRoute.distance.toFixed(2)}m`
+                    : `${selectedRoute.distance}`
+                  : 'Distance N/A'
+                }
+                {' • '}
+                {selectedRoute.duration !== undefined && selectedRoute.duration !== null && !isNaN(selectedRoute.duration)
+                  ? `${selectedRoute.duration.toFixed(0)}min`
+                  : 'Duration N/A'
+                }
+              </>
+            ) : 'No route selected'}
           </div>
         </div>
       </div>
       {/* Ajout debug visuel : centre et premier point */}
       <div style={{position: 'absolute', bottom: 0, left: 0, background: '#fff', zIndex:999, fontSize:14, padding:4, border:'1px solid #ccc'}}>
         <div>Centre carte (prop): {JSON.stringify(center)}</div>
-        <div>Premier point traj. (lat,lng): {routeCoordinates[0] ? routeCoordinates[0].join(', ') : 'aucun'}</div>
+        <div>Premier point traj. (lat,lng): {routeCoordinates[0] 
+          ? routeCoordinates[0].map((c: number) => c !== undefined && !isNaN(c) ? c.toFixed(6) : 'N/A').join(', ') 
+          : 'aucun'}</div>
       </div>
     </div>
   )
