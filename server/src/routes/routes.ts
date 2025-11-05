@@ -9,6 +9,7 @@ import * as GraphCache from '../services/graph-cache.js'
 import { osmService } from '../services/osm-service.js'
 import { routingService } from '../services/routing-service.js'
 import { ensureOSMFormat, detectFormat } from '../utils/format-adapter.js'
+import { getElevations, calculateElevationGain } from '../services/elevation-service.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -355,7 +356,8 @@ router.post('/generate', async (req, res) => {
       start_lon,
       distance,
       difficulty,
-      terrain_type
+      terrain_type,
+      pace // Pace en min/km (ex: 5 pour 5 min/km)
     } = req.body
 
     if (!start_lat || !start_lon || !distance) {
@@ -367,6 +369,7 @@ router.post('/generate', async (req, res) => {
     console.log(`🎯 Route generation request:`)
     console.log(`   - Location: ${start_lat}, ${start_lon}`)
     console.log(`   - Distance: ${distance} km`)
+    console.log(`   - Pace: ${pace || 'N/A'} min/km`)
     console.log(`   - Difficulty: ${difficulty || 'any'}`)
     console.log(`   - Terrain: ${terrain_type || 'any'}`)
 
@@ -435,21 +438,106 @@ router.post('/generate', async (req, res) => {
         console.warn('[routes.ts] validation.warnings absent ou undefined:', validation)
       }
       console.log(`✅ Graph validated: nodes=${graph.nodes.size}, edges=${graph.edges.size}`)
+      // Trouver le nœud le plus proche du point de départ
+      const { findClosestNodeWithConnections } = await import('../algorithms/loop-generator.js');
+      // Chercher un nœud avec au moins 3 connexions dans un rayon de 500m
+      let closestNodeId = findClosestNodeWithConnections(graph, start_lat, start_lon, 3);
+      
+      // Si aucun nœud avec 3+ connexions n'est trouvé, chercher avec 2 connexions
+      if (!closestNodeId) {
+        closestNodeId = findClosestNodeWithConnections(graph, start_lat, start_lon, 2);
+      }
+      
+      // Si toujours rien, utiliser le nœud le plus proche
+      if (!closestNodeId) {
+        const { findClosestNode } = await import('../algorithms/loop-generator.js');
+        closestNodeId = findClosestNode(graph, start_lat, start_lon);
+      }
+      
+      if (!closestNodeId) {
+        throw new Error(`No nodes found in graph near location (${start_lat}, ${start_lon})`);
+      }
+      
+      const startNode = graph.nodes.get(closestNodeId);
+      if (startNode) {
+        console.log(`📍 Starting from node ${closestNodeId} at (${startNode.lat.toFixed(6)}, ${startNode.lon.toFixed(6)})`)
+        
+        // Vérifier que le nœud a des connexions
+        const connections = graph.edges ? Array.from(graph.edges.values()).filter(e => 
+          e.from === closestNodeId || e.to === closestNodeId
+        ).length : 0;
+        console.log(`   🔗 Node connections: ${connections} edges`);
+        
+        if (connections === 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'Point de départ isolé',
+            message: 'Le point de départ n\'a aucune connexion dans le graphe. Essayez un autre emplacement.',
+            timing: Date.now() - startTime
+          });
+        }
+      }
+      
       // Générer les boucles
       console.log(`🔄 Generating loops...`)
       const { loops, debug } = generateLoops(graph, {
-        startNodeId: Array.from(graph.nodes.keys())[0], // TEMP: à améliorer avec proche du start_lat/lon
+        startNodeId: closestNodeId,
         targetDistance: distance * 1000,
-        numVariants: 5,
+        numVariants: 1, // Une seule boucle
         minReturnAngleDeg: 90,
         scoring: { distance: 0.4, angle: 0.3, quality: 0.2, diversity: 0.1 },
         debug: true
       })
+      
+      console.log(`✅ Generated ${loops.length} loop(s)`)
+      if (loops.length > 0) {
+        loops.forEach((loop, i) => {
+          console.log(`   Loop ${i + 1}: ${(loop.distance / 1000).toFixed(2)}km, ${loop.loop.length} nodes, quality=${loop.qualityScore.toFixed(1)}`)
+        })
+      } else {
+        console.warn('⚠️  No loops generated')
+        console.warn(`   Debug info:`, {
+          candidatesCount: debug.candidates?.length || 0,
+          warnings: debug.warnings || [],
+          exploredNodes: debug.stats?.exploredNodes || 0,
+          timings: debug.timings || {}
+        })
+      }
+      
+      // Si aucune boucle n'a été générée, retourner une erreur explicite
+      if (loops.length === 0) {
+        const totalTime = Date.now() - startTime
+        console.error('❌ Aucune boucle générée. Debug:', JSON.stringify(debug, null, 2))
+        return res.status(400).json({
+          success: false,
+          error: 'Impossible de générer une boucle avec les paramètres donnés',
+          message: 'L\'algorithme n\'a pas pu trouver de chemin suffisamment long dans cette zone. Essayez une distance plus courte ou une autre position.',
+          debug: {
+            candidatesCount: debug.candidates?.length || 0,
+            warnings: debug.warnings || [],
+            exploredNodes: debug.stats?.exploredNodes || 0,
+            timings: debug.timings || {}
+          },
+          timing: totalTime
+        })
+      }
+      
       const totalTime = Date.now() - startTime
-      return res.json({
-        success: true,
-        method: 'custom_algorithm',
-        routes: loops.map((loop, i) => {
+      
+      // Traiter les boucles avec await (on ne peut pas utiliser await dans map)
+      const processedRoutes: any[] = [];
+      
+      if (loops.length === 0) {
+        // Déjà vérifié plus haut, mais sécurité supplémentaire
+        return res.status(400).json({
+          success: false,
+          error: 'Aucune boucle générée',
+          message: 'L\'algorithme n\'a pas pu trouver de chemin dans cette zone.',
+          timing: totalTime
+        });
+      }
+      
+      for (const loop of loops.slice(0, 1)) {
           // Construire les coordonnées depuis les nœuds du loop
           const coordinates = Array.isArray(loop.loop) && loop.loop.length >= 2
             ? loop.loop.map(lid => {
@@ -458,30 +546,273 @@ router.post('/generate', async (req, res) => {
               }).filter((coord): coord is [number, number] => coord !== undefined)
             : []
           
-          return {
-            id: `custom_${i}_${Date.now()}`,
-            name: `Boucle ${i + 1}`,
-            distance: loop.distance || 0,
+          // Recalculer la distance totale depuis les coordonnées réelles (plus fiable)
+          let totalDistance = 0;
+          if (coordinates.length >= 2) {
+            // Utiliser la fonction haversine pour calculer la distance réelle entre les points
+            const haversine = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+              const R = 6371000; // Rayon de la Terre en mètres
+              const toRad = (x: number) => x * Math.PI / 180;
+              const dLat = toRad(lat2 - lat1);
+              const dLon = toRad(lon2 - lon1);
+              const a = Math.sin(dLat / 2) ** 2 + 
+                        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+              return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            };
+            
+            // Somme des distances entre points consécutifs
+            for (let i = 0; i < coordinates.length - 1; i++) {
+              const [lon1, lat1] = coordinates[i];
+              const [lon2, lat2] = coordinates[i + 1];
+              // Vérifier que les coordonnées sont valides (lat entre -90 et 90, lon entre -180 et 180)
+              if (lat1 >= -90 && lat1 <= 90 && lat2 >= -90 && lat2 <= 90 &&
+                  lon1 >= -180 && lon1 <= 180 && lon2 >= -180 && lon2 <= 180) {
+                totalDistance += haversine(lat1, lon1, lat2, lon2);
+              }
+            }
+          }
+          
+          // Si le calcul depuis les coordonnées échoue, utiliser les edges
+          if (totalDistance === 0 && loop.pathEdges && loop.pathEdges.length > 0) {
+            for (const edgeId of loop.pathEdges) {
+              const edge = graph.edges.get(edgeId);
+              if (edge) {
+                totalDistance += edge.distance;
+              }
+            }
+          }
+          
+          // Utiliser la distance calculée ou celle du loop
+          const finalDistance = totalDistance > 0 ? totalDistance : loop.distance;
+          
+          // Debug: log pour vérifier (avec premiers points pour détecter inversion lat/lon)
+          const firstCoord = coordinates.length > 0 ? coordinates[0] : null;
+          const lastCoord = coordinates.length > 0 ? coordinates[coordinates.length - 1] : null;
+          console.log(`   🔍 Distance check: calculated=${(totalDistance / 1000).toFixed(3)}km, loop.distance=${(loop.distance / 1000).toFixed(3)}km, final=${(finalDistance / 1000).toFixed(3)}km`)
+          console.log(`   🔍 Coords: first=[${firstCoord ? `${firstCoord[0].toFixed(6)}, ${firstCoord[1].toFixed(6)}` : 'N/A'}], last=[${lastCoord ? `${lastCoord[0].toFixed(6)}, ${lastCoord[1].toFixed(6)}` : 'N/A'}], count=${coordinates.length}`)
+          console.log(`   🔍 Path edges count: ${loop.pathEdges?.length || 0}`)
+          
+          // Vérifier qu'il n'y a pas de duplication d'edges
+          if (loop.pathEdges) {
+            const uniqueEdges = new Set(loop.pathEdges);
+            if (uniqueEdges.size !== loop.pathEdges.length) {
+              console.warn(`   ⚠️  Duplicate edges detected: ${loop.pathEdges.length} total, ${uniqueEdges.size} unique`);
+            }
+          }
+          
+          // Analyser les surfaces utilisées dans le parcours
+          const surfaceStats: Record<string, number> = {}; // surface -> distance en mètres
+          let totalSurfaceDistance = 0;
+          
+          if (loop.pathEdges) {
+            for (const edgeId of loop.pathEdges) {
+              const edge = graph.edges.get(edgeId);
+              if (edge) {
+                // Déterminer le type de surface
+                let surfaceType = 'unknown';
+                if (edge.surface) {
+                  // Normaliser les surfaces OSM
+                  const surface = edge.surface.toLowerCase();
+                  if (surface.includes('asphalt') || surface.includes('paved') || surface.includes('concrete')) {
+                    surfaceType = 'paved';
+                  } else if (surface.includes('unpaved') || surface.includes('dirt') || surface.includes('gravel') || surface.includes('earth') || surface.includes('grass')) {
+                    surfaceType = 'unpaved';
+                  } else {
+                    surfaceType = 'unpaved'; // Par défaut
+                  }
+                } else if (edge.tags?.highway) {
+                  // Déduire du type de route
+                  const highway = edge.tags.highway.toLowerCase();
+                  if (['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential', 'service'].includes(highway)) {
+                    surfaceType = 'paved';
+                  } else {
+                    surfaceType = 'unpaved';
+                  }
+                } else {
+                  surfaceType = 'unpaved'; // Par défaut
+                }
+                
+                surfaceStats[surfaceType] = (surfaceStats[surfaceType] || 0) + edge.distance;
+                totalSurfaceDistance += edge.distance;
+              }
+            }
+          }
+          
+          // Calculer les pourcentages de surface
+          const surfaceBreakdown: Array<{ type: string; distance: number; percentage: number }> = [];
+          for (const [type, distance] of Object.entries(surfaceStats)) {
+            surfaceBreakdown.push({
+              type,
+              distance,
+              percentage: totalSurfaceDistance > 0 ? (distance / totalSurfaceDistance) * 100 : 0
+            });
+          }
+          surfaceBreakdown.sort((a, b) => b.percentage - a.percentage);
+          
+          // Convertir la distance en kilomètres pour correspondre au type Route (distance in kilometers)
+          const distanceInKm = finalDistance / 1000;
+          
+          // Récupérer les altitudes réelles depuis l'API d'élévation
+          let elevations: number[] = [];
+          let elevationGain = 0;
+          let elevationProfile: Array<{ distance: number; elevation: number; coordinate: [number, number] }> = [];
+          
+          if (coordinates.length > 1) {
+            // Échantillonner les coordonnées pour éviter trop de requêtes (1 point tous les ~50m)
+            const sampleInterval = Math.max(1, Math.floor(coordinates.length / 100)); // Max 100 points
+            const sampledCoordinates: [number, number][] = [];
+            
+            for (let i = 0; i < coordinates.length; i += sampleInterval) {
+              sampledCoordinates.push(coordinates[i]);
+            }
+            
+            // Toujours inclure le dernier point si différent
+            const lastSampled = sampledCoordinates[sampledCoordinates.length - 1];
+            const lastOriginal = coordinates[coordinates.length - 1];
+            if (lastSampled && lastOriginal && 
+                (lastSampled[0] !== lastOriginal[0] || lastSampled[1] !== lastOriginal[1])) {
+              sampledCoordinates.push(lastOriginal);
+            }
+            
+            console.log(`   📍 Récupération des altitudes pour ${sampledCoordinates.length} points (échantillonnage sur ${coordinates.length})...`);
+            
+            try {
+              // Récupérer les altitudes depuis l'API avec timeout
+              const elevationPromise = getElevations(sampledCoordinates);
+              const timeoutPromise = new Promise<number[]>((resolve) => {
+                setTimeout(() => {
+                  console.warn('   ⚠️  Timeout lors de la récupération des altitudes, utilisation de valeurs par défaut');
+                  resolve([]);
+                }, 8000); // Timeout de 8 secondes
+              });
+              
+              elevations = await Promise.race([elevationPromise, timeoutPromise]);
+              
+              if (elevations.length > 0 && elevations.length === sampledCoordinates.length) {
+                // Log des premières altitudes pour debug
+                const firstFew = elevations.slice(0, Math.min(5, elevations.length));
+                console.log(`   📊 Premières altitudes: ${firstFew.map(e => e.toFixed(1)).join(', ')}m`);
+                
+                // Calculer le dénivelé cumulé positif
+                elevationGain = calculateElevationGain(elevations);
+                
+                // Créer le profil d'élévation avec les distances réelles
+                elevationProfile = sampledCoordinates.map((coord, index) => {
+                  const progress = index / Math.max(1, sampledCoordinates.length - 1);
+                  return {
+                    distance: progress * distanceInKm,
+                    elevation: Math.round(elevations[index] || 150),
+                    coordinate: coord
+                  };
+                });
+                
+                const minElev = Math.min(...elevations);
+                const maxElev = Math.max(...elevations);
+                console.log(`   ✅ Altitudes récupérées: ${elevations.length} points, min=${minElev.toFixed(1)}m, max=${maxElev.toFixed(1)}m, dénivelé=${elevationGain}m`);
+              } else {
+                console.warn(`   ⚠️  Aucune altitude récupérée ou nombre incorrect (${elevations.length} vs ${sampledCoordinates.length}), utilisation de valeurs par défaut`);
+                elevationGain = 0;
+                // Créer un profil minimal avec altitudes par défaut
+                elevationProfile = sampledCoordinates.map((coord, index) => {
+                  const progress = index / Math.max(1, sampledCoordinates.length - 1);
+                  return {
+                    distance: progress * distanceInKm,
+                    elevation: 150, // Altitude par défaut
+                    coordinate: coord
+                  };
+                });
+              }
+            } catch (error) {
+              console.error('   ❌ Erreur lors de la récupération des altitudes:', error);
+              elevationGain = 0;
+              // Créer un profil minimal avec altitudes par défaut en cas d'erreur
+              elevationProfile = sampledCoordinates.length > 0 ? sampledCoordinates.map((coord, index) => {
+                const progress = index / Math.max(1, sampledCoordinates.length - 1);
+                return {
+                  distance: progress * distanceInKm,
+                  elevation: 150, // Altitude par défaut
+                  coordinate: coord
+                };
+              }) : [];
+            }
+          }
+          
+          // Calculer la durée estimée en utilisant le pace (min/km)
+          // Si pace = 5 min/km, alors vitesse = 60/5 = 12 km/h
+          // Distance en mètres, donc durée = (distance_m / 1000) * pace_min_per_km
+          const paceMinPerKm = pace && pace > 0 ? pace : 5; // Par défaut 5 min/km si non spécifié
+          const speedKmh = 60 / paceMinPerKm; // Convertir min/km en km/h
+          const speedMs = speedKmh / 3.6; // Convertir km/h en m/s
+          
+          // Durée en minutes = distance (km) * pace (min/km)
+          const durationMinutes = Math.round(distanceInKm * paceMinPerKm);
+          
+          // Vitesse moyenne (en km/h)
+          const averageSpeed = speedKmh;
+          
+          console.log(`   📊 Loop stats: distance=${distanceInKm.toFixed(2)}km, duration=${durationMinutes}min, elevation=${elevationGain.toFixed(0)}m`)
+          
+          const now = new Date().toISOString();
+          const route = {
+            id: `custom_0_${Date.now()}`,
+            name: `Boucle de ${distanceInKm.toFixed(1)} km`,
+            distance: distanceInKm, // Distance en kilomètres (comme spécifié dans le type Route)
+            duration: durationMinutes, // Durée en minutes
+            elevation: Math.round(elevationGain), // Dénivelé en mètres (réel depuis l'API)
+            difficulty: 'medium' as const, // Difficulté par défaut
+            terrain_type: (surfaceBreakdown.length > 0 && surfaceBreakdown[0].type === 'paved') 
+              ? 'paved' as const 
+              : surfaceBreakdown.length > 1 
+                ? 'mixed' as const 
+                : 'unpaved' as const,
+            created_at: now,
+            updated_at: now,
+            average_speed: parseFloat(averageSpeed.toFixed(1)), // Vitesse moyenne en km/h
             geometry: {
               type: 'LineString' as const,
               coordinates
             },
             waypoints: coordinates.length > 0 ? [
-              { lat: coordinates[0][1], lon: coordinates[0][0], type: 'start' },
-              { lat: coordinates[coordinates.length - 1][1], lon: coordinates[coordinates.length - 1][0], type: 'end' }
+              { 
+                lat: coordinates[0][1], 
+                lon: coordinates[0][0], 
+                type: 'start',
+                name: 'Départ'
+              },
+              { 
+                lat: coordinates[coordinates.length - 1][1], 
+                lon: coordinates[coordinates.length - 1][0], 
+                type: 'end',
+                name: 'Arrivée'
+              }
             ] : [],
             quality_score: loop.qualityScore || 0,
             pathEdges: loop.pathEdges || [],
+            surface_breakdown: surfaceBreakdown, // Nouvelle information de surface
+            elevation_profile: elevationProfile.length > 0 ? elevationProfile : [],
             debug: loop.debug
-          }
-        }),
+          };
+        
+        processedRoutes.push(route);
+      }
+      
+      return res.json({
+        success: true,
+        method: 'custom_algorithm',
+        routes: processedRoutes,
         debug,
         timing: totalTime
       });
     } catch (customError) {
-      console.error(customError);
+      console.error('❌ Erreur dans la génération de boucles:', customError);
       const errorMessage = customError instanceof Error ? customError.message : String(customError);
-      return res.status(500).json({ error: "Erreur dans l'algorithme de génération de boucles (custom)", details: errorMessage });
+      const errorStack = customError instanceof Error ? customError.stack : undefined;
+      console.error('Stack trace:', errorStack);
+      return res.status(500).json({ 
+        error: "Erreur dans l'algorithme de génération de boucles (custom)", 
+        details: errorMessage,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined
+      });
     }
   } catch (error) {
     console.error('Generate route error:', error)

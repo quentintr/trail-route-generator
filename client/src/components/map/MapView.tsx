@@ -181,9 +181,9 @@ export const MapView: React.FC<MapViewProps> = ({
               <>
                 {selectedRoute.distance !== undefined && selectedRoute.distance !== null 
                   ? typeof selectedRoute.distance === 'number'
-                    ? selectedRoute.distance >= 1000
-                      ? `${(selectedRoute.distance / 1000).toFixed(2)}km`
-                      : `${selectedRoute.distance.toFixed(2)}m`
+                    ? selectedRoute.distance < 1
+                      ? `${(selectedRoute.distance * 1000).toFixed(0)}m`
+                      : `${selectedRoute.distance.toFixed(2)}km`
                     : `${selectedRoute.distance}`
                   : 'Distance N/A'
                 }

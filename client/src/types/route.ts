@@ -1,3 +1,15 @@
+export interface SurfaceBreakdown {
+  type: string
+  distance: number // Distance in meters
+  percentage: number
+}
+
+export interface ElevationPoint {
+  distance: number // Distance in kilometers
+  elevation: number // Elevation in meters
+  coordinate: [number, number] // [longitude, latitude]
+}
+
 export interface Route {
   id: string
   name: string
@@ -12,6 +24,12 @@ export interface Route {
   geometry?: GeoJSON.LineString
   waypoints?: Waypoint[]
   user_id?: string
+  // New fields from backend
+  surface_breakdown?: SurfaceBreakdown[]
+  elevation_profile?: ElevationPoint[]
+  pathEdges?: string[]
+  quality_score?: number
+  average_speed?: number
 }
 
 export interface Waypoint {

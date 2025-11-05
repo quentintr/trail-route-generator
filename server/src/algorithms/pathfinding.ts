@@ -5,7 +5,7 @@ export interface PathfindingResult {
   distance: number;
 }
 
-export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=3000, maxNodes=500): PathfindingResult|null {
+export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=3000, maxNodes=500, forbiddenEdges?: Set<string>): PathfindingResult|null {
   // Simple BFS avec distance
   const queue: [string, number, string[]][] = [[start, 0, [start]]];
   const visited = new Set<string>();
@@ -17,8 +17,18 @@ export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=
     const node = graph.nodes.get(u);
     if(!node) continue;
     for(const v of node.connections) {
-      const e = graph.edges.get(`${u}-${v}`);
+      // Essayer les deux sens de l'edge
+      let e = graph.edges.get(`${u}-${v}`);
+      if(!e) {
+        e = graph.edges.get(`${v}-${u}`);
+      }
       if(!e) continue;
+      
+      // Éviter les edges interdites (pour éviter de revenir par le même chemin)
+      if (forbiddenEdges && (forbiddenEdges.has(e.id) || forbiddenEdges.has(`${u}-${v}`) || forbiddenEdges.has(`${v}-${u}`))) {
+        continue;
+      }
+      
       queue.push([v, dist+e.distance, [...path, v]]);
     }
   }

@@ -1,5 +1,6 @@
 import React from 'react'
 import { Route } from '../../types/route'
+import { RoutePreview } from './RoutePreview'
 
 interface RouteCardProps {
   route: Route
@@ -101,13 +102,17 @@ export const RouteCard: React.FC<RouteCardProps> = ({
           <div className="text-2xl font-bold text-indigo-600">
             {route.distance !== undefined && route.distance !== null 
               ? typeof route.distance === 'number' 
-                ? route.distance >= 1000 
-                  ? `${(route.distance / 1000).toFixed(2)}`
+                ? route.distance < 1 
+                  ? `${(route.distance * 1000).toFixed(0)}`
                   : route.distance.toFixed(2)
                 : route.distance
               : '-'}
           </div>
-          <div className="text-xs text-gray-500">km</div>
+          <div className="text-xs text-gray-500">
+            {route.distance !== undefined && route.distance !== null && typeof route.distance === 'number' && route.distance < 1 
+              ? 'm' 
+              : 'km'}
+          </div>
         </div>
         <div className="text-center">
           <div className="text-2xl font-bold text-green-600">{formatDuration(route.duration)}</div>
@@ -132,11 +137,8 @@ export const RouteCard: React.FC<RouteCardProps> = ({
 
       {/* Map thumbnail */}
       {route.geometry && (
-        <div 
-          data-testid="route-thumbnail"
-          className="w-full h-20 bg-gray-100 rounded mb-4 flex items-center justify-center"
-        >
-          <div className="text-gray-400 text-sm">Route Preview</div>
+        <div className="mb-4">
+          <RoutePreview route={route} height="h-20" />
         </div>
       )}
 
