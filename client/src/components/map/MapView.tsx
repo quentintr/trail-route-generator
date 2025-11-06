@@ -53,7 +53,7 @@ const MapUpdater: React.FC<{ route: Route | null }> = ({ route }) => {
             !isNaN(coord[0]) &&
             !isNaN(coord[1])
           )
-          .map(([lng, lat]) => [lat, lng] as [number, number])
+          .map((coord: [number, number]) => [coord[1], coord[0]] as [number, number]) // Inverser [lon,lat] en [lat,lon]
         
         // Create bounds and fit map to route
         const bounds = L.latLngBounds(latLngs)
@@ -81,7 +81,8 @@ export const MapView: React.FC<MapViewProps> = ({
   isLoading = false,
   showZoomControls = true,
 }) => {
-  // Convert route geometry to Leaflet format
+  // ✅ CORRECTION CRITIQUE : Utiliser geometry.coordinates (pas waypoints) et inverser [lon,lat] en [lat,lon]
+  // GeoJSON utilise [longitude, latitude] mais Leaflet utilise [latitude, longitude]
   const routeCoordinates = selectedRoute?.geometry?.coordinates
     ?.filter((coord): coord is [number, number] => 
       Array.isArray(coord) && 
@@ -91,18 +92,32 @@ export const MapView: React.FC<MapViewProps> = ({
       !isNaN(coord[0]) &&
       !isNaN(coord[1])
     )
-    ?.map(([lng, lat]) => [lat, lng] as [number, number]) || []
+    ?.map((coord: [number, number]) => [coord[1], coord[0]] as [number, number]) || [] // Inverser [lon,lat] en [lat,lon] pour Leaflet
   
   // Debug: Log coordinates to see what's happening
   if (selectedRoute) {
+    const totalCoordinates = selectedRoute.geometry?.coordinates?.length || 0
+    console.log(`📍 MapView: Route ${selectedRoute.id} has ${totalCoordinates} coordinates`)
     console.log('MapView Debug:', {
       routeId: selectedRoute.id,
-      originalCoordinates: selectedRoute.geometry?.coordinates?.slice(0, 3), // First 3 coordinates
-      convertedCoordinates: routeCoordinates.slice(0, 3), // First 3 converted coordinates
+      totalCoordinates: totalCoordinates, // ✅ Nombre total de coordonnées
+      originalCoordinates: selectedRoute.geometry?.coordinates?.slice(0, 3), // First 3 coordinates (for inspection)
+      convertedCoordinates: routeCoordinates.slice(0, 3), // First 3 converted coordinates (for inspection)
+      convertedTotal: routeCoordinates.length, // ✅ Nombre total après conversion
       center: center,
       startPoint: routeCoordinates[0],
-      endPoint: routeCoordinates[routeCoordinates.length - 1]
+      endPoint: routeCoordinates[routeCoordinates.length - 1],
+      // ✅ Vérification critique : si on a seulement 3 coordonnées, c'est un problème
+      warning: totalCoordinates < 10 ? `⚠️ ONLY ${totalCoordinates} COORDINATES - Should be 200-300!` : 'OK'
     })
+    
+    // ✅ Alerte si problème détecté
+    if (totalCoordinates < 10) {
+      console.error('❌ CRITICAL: Route has only', totalCoordinates, 'coordinates instead of 200-300!')
+      console.error('Route geometry:', selectedRoute.geometry)
+      console.error('Route waypoints:', selectedRoute.waypoints)
+      console.error('⚠️ VERIFY: Are you using geometry.coordinates and NOT waypoints?')
+    }
   }
   
   // Get start and end points

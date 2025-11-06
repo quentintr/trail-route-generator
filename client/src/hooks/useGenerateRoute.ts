@@ -23,6 +23,17 @@ export const useGenerateRoute = (): UseGenerateRouteReturn => {
       
       // The API returns { success: true, routes: [...], message: "..." }
       if (response && response.success && Array.isArray(response.routes)) {
+        // ✅ Vérification critique : vérifier que les coordonnées sont présentes
+        response.routes.forEach((route: Route, index: number) => {
+          const coordCount = route.geometry?.coordinates?.length || 0
+          console.log(`✅ useGenerateRoute: Route ${index + 1} has ${coordCount} coordinates`)
+          
+          if (coordCount < 10) {
+            console.error(`❌ useGenerateRoute: Route ${index + 1} has only ${coordCount} coordinates!`)
+            console.error('Route:', route)
+          }
+        })
+        
         setRoutes(response.routes)
         return response.routes
       } else {

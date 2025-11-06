@@ -16,6 +16,25 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Calcule l'azimut (bearing) entre deux points en degrés (0-360)
+ * 0° = Nord, 90° = Est, 180° = Sud, 270° = Ouest
+ */
+function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const lat1Rad = lat1 * Math.PI / 180;
+  const lat2Rad = lat2 * Math.PI / 180;
+  
+  const y = Math.sin(dLon) * Math.cos(lat2Rad);
+  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+            Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+  
+  let bearing = Math.atan2(y, x) * 180 / Math.PI;
+  bearing = (bearing + 360) % 360; // Normaliser à 0-360
+  
+  return bearing;
+}
+
 // Trouver le nœud le plus proche avec de bonnes connexions
 export function findClosestNode(graph: Graph, lat: number, lon: number): string | null {
   return findClosestNodeWithConnections(graph, lat, lon, 1);
@@ -271,8 +290,9 @@ export function generateLoops(
     // Exploration radiale normale pour les nœuds avec plusieurs connexions
     const directions = getDirections();
     for (const dir of directions) {
-      // Explorer jusqu'à 60% de la distance cible pour avoir plus de marge
-      radialResults[dir] = radialExplore(graph, start, dir, target * 0.6);
+      // CORRECTION : Explorer jusqu'à 55% de la distance cible (au lieu de 50%)
+      // Le retour fera ~45% pour avoir une boucle totale de ~100%
+      radialResults[dir] = radialExplore(graph, start, dir, target * 0.55);
     }
   }
   
@@ -387,80 +407,147 @@ export function generateLoops(
   // Générer les boucles : prendre les meilleurs candidats et construire les boucles complètes
   const loops: GeneratedLoop[] = [];
   
-  // Si on a des candidats avec chemin de retour, les utiliser en priorité
-  const candidatesWithReturn = candidates.filter(c => c.returnPathsStats);
-  const candidatesWithoutReturn = candidates.filter(c => !c.returnPathsStats);
+  // CORRECTION : Traiter TOUS les candidats pour générer plusieurs boucles
+  // Même les candidats sans retour initial peuvent être utilisés (on calculera le retour après)
+  const allCandidates = candidates;
   
-  const scoredCandidates = candidatesWithReturn.length > 0
-    ? candidatesWithReturn.map(c => {
-      // Calculer le score
-      const distanceScore = Math.abs(c.distance - target * 0.5) / target; // Plus proche de target/2 = meilleur
-      const angleScore = Math.abs(c.angle) / 180; // Normaliser l'angle
-      const score = (1 - distanceScore) * (options.scoring?.distance || 0.4) +
-                    (1 - angleScore) * (options.scoring?.angle || 0.3) +
-                    (c.qualityScore / 100) * (options.scoring?.quality || 0.2) +
-                    (c.returnPathsStats!.diversity / 10) * (options.scoring?.diversity || 0.1);
-      return { ...c, score };
-    }).sort((a, b) => b.score - a.score).slice(0, numVariants)
-    : candidatesWithoutReturn
-        .sort((a, b) => b.distance - a.distance) // Trier par distance décroissante
-        .slice(0, numVariants);
+  const scoredCandidates = allCandidates.map(c => {
+    // Calculer le score
+    const distanceScore = Math.abs(c.distance - target * 0.5) / target; // Plus proche de target/2 = meilleur
+    const angleScore = Math.abs(c.angle) / 180; // Normaliser l'angle
+    const hasReturn = c.returnPathsStats ? 1 : 0; // Bonus si chemin de retour disponible
+    const score = (1 - distanceScore) * (options.scoring?.distance || 0.4) +
+                  (1 - angleScore) * (options.scoring?.angle || 0.3) +
+                  (c.qualityScore / 100) * (options.scoring?.quality || 0.2) +
+                  (hasReturn * 0.1); // Bonus pour avoir un chemin de retour
+    return { ...c, score };
+  }).sort((a, b) => b.score - a.score); // Trier par score décroissant
 
   // Construire les boucles complètes (aller + retour)
-  for (const candidate of scoredCandidates) {
-    // Créer un Set des edges interdites pour éviter de revenir par le même chemin
-    const forbiddenEdges = new Set<string>(candidate.pathEdges);
+  // CORRECTION : Limiter à 10 candidats pour éviter trop de boucles, mais essayer de générer 3 boucles valides
+  const topCandidates = scoredCandidates.slice(0, 10);
+  console.log(`\n📊 Processing ${topCandidates.length} top candidates (from ${scoredCandidates.length} total)`);
+  
+  // CORRECTION : Si on a peu de candidats, essayer de générer plusieurs boucles depuis le même candidat
+  // en utilisant différents nœuds intermédiaires le long du chemin aller
+  if (topCandidates.length === 1 && loops.length < 3) {
+    console.log(`\n🔄 Only 1 candidate found, trying to generate multiple loops from intermediate nodes`);
+    const candidate = topCandidates[0];
+    const intermediateNodes = candidate.pathOut.slice(1, -1); // Tous les nœuds sauf le début et la fin
     
-    // Essayer d'abord avec les edges interdites pour avoir un vrai retour différent
-    let returnResult: PathfindingResult | null = null;
+    // Essayer les nœuds à 1/3, 1/2 et 2/3 du chemin pour créer des variantes
+    const keyPoints = [
+      intermediateNodes[Math.floor(intermediateNodes.length * 0.33)],
+      intermediateNodes[Math.floor(intermediateNodes.length * 0.5)],
+      intermediateNodes[Math.floor(intermediateNodes.length * 0.67)]
+    ].filter(Boolean);
     
-    // Utiliser des limites très larges pour permettre de longs chemins de retour
-    // Essayer d'abord avec les edges interdites (éviter le chemin aller)
-    returnResult = dijkstra(graph, candidate.nodeId, start, target * 5.0, 20000, forbiddenEdges);
-    
-    // Si on ne trouve pas de chemin évitant les edges de l'aller, essayer sans restriction
-    // (meilleur que rien, mais on préfère un vrai retour différent)
-    if (!returnResult || !returnResult.path) {
-      console.log(`[LoopGenerator] No return path avoiding forward edges, trying without restriction`);
-      returnResult = dijkstra(graph, candidate.nodeId, start, target * 5.0, 20000);
+    for (const intermediateNode of keyPoints) {
+      if (loops.length >= 3) break;
+      
+      // Créer un nouveau candidat depuis ce nœud intermédiaire
+      const intermediateIndex = candidate.pathOut.indexOf(intermediateNode);
+      if (intermediateIndex === -1) continue;
+      
+      const partialPath = candidate.pathOut.slice(0, intermediateIndex + 1);
+      const partialEdges = candidate.pathEdges.slice(0, intermediateIndex);
+      let partialDistance = 0;
+      for (const edgeId of partialEdges) {
+        const edge = graph.edges.get(edgeId);
+        if (edge) partialDistance += edge.distance;
+      }
+      
+      if (partialDistance < target * 0.2) continue; // Trop court
+      
+      console.log(`\n🔄 Building loop variant from intermediate node ${intermediateNode} (at ${(partialDistance / 1000).toFixed(2)}km)`);
+      
+      const returnPath = calculateReturnPath(
+        graph,
+        intermediateNode,
+        start,
+        partialEdges,
+        target * 5.0
+      );
+      
+      if (!returnPath || returnPath.overlapRatio > 0.7) continue;
+      
+      const totalDist = partialDistance + returnPath.distance;
+      const distanceAccuracy = 1 - Math.abs(totalDist - target) / target;
+      
+      if (distanceAccuracy < 0.5) continue;
+      
+      const fullLoop = [...partialPath, ...returnPath.path.slice(1)];
+      const allEdges = [...partialEdges, ...returnPath.path.slice(0, -1).map((n, i) => {
+        const from = returnPath.path[i];
+        const to = returnPath.path[i + 1];
+        const edge = graph.edges.get(`${from}-${to}`) || graph.edges.get(`${to}-${from}`);
+        return edge?.id || '';
+      }).filter(Boolean)];
+      
+      const qualityScore = Math.min(1.0, (1 - returnPath.overlapRatio) * distanceAccuracy);
+      
+      loops.push({
+        loop: fullLoop,
+        pathEdges: allEdges,
+        distance: totalDist,
+        qualityScore,
+        debug: {
+          outPath: partialPath,
+          returnPath: returnPath.path,
+          outDistance: partialDistance,
+          returnDistance: returnPath.distance,
+          totalDistance: totalDist,
+          overlapRatio: returnPath.overlapRatio,
+          distanceAccuracy,
+          note: 'Variant from intermediate node'
+        }
+      });
+      
+      console.log(`   ✅ Variant loop: ${(totalDist / 1000).toFixed(2)}km, quality=${qualityScore.toFixed(2)}`);
     }
+  }
+  
+  for (const candidate of topCandidates) {
+    console.log(`\n🔄 Building loop for candidate ${candidate.nodeId}...`);
+    console.log(`   Forward path: ${(candidate.distance / 1000).toFixed(2)} km, ${candidate.pathOut.length} nodes`);
     
-    if (!returnResult || !returnResult.path) {
-      // Si on ne trouve toujours pas de retour, on passe au fallback plus tard
+    // CORRECTION : Calculer le retour avec logs détaillés
+    const explorationEdges = candidate.pathEdges;
+    
+    console.log(`   🔙 Calculating return path...`);
+    console.log(`      Avoiding ${explorationEdges.length} forward edges`);
+    
+    const returnPath = calculateReturnPath(
+      graph,
+      candidate.nodeId,
+      start,
+      explorationEdges,
+      target * 5.0
+    );
+    
+    if (!returnPath) {
+      console.log(`   ❌ No return path found for candidate ${candidate.nodeId}`);
       continue;
     }
     
-    // Vérifier que le chemin de retour est vraiment différent (pas juste l'inverse)
-    const returnEdgesSet = new Set<string>();
-    for (let i = 0; i < returnResult.path.length - 1; i++) {
-      const from = returnResult.path[i];
-      const to = returnResult.path[i + 1];
-      let edge = graph.edges.get(`${from}-${to}`);
-      if (!edge) {
-        edge = graph.edges.get(`${to}-${from}`);
-      }
-      if (edge) {
-        returnEdgesSet.add(edge.id);
-      }
+    console.log(`   ✅ Return path: ${(returnPath.distance / 1000).toFixed(2)} km, ${returnPath.path.length} nodes, overlap: ${(returnPath.overlapRatio * 100).toFixed(1)}%`);
+    
+    // CORRECTION : Rejeter si chevauchement > 70% (au lieu de 40% pour avoir plus de boucles)
+    if (returnPath.overlapRatio > 0.7) {
+      console.log(`   ⚠️  Return path overlaps ${(returnPath.overlapRatio * 100).toFixed(1)}% with forward path (max 70%), rejecting this loop`);
+      continue;
     }
     
-    // Vérifier le chevauchement
-    let overlapCount = 0;
-    for (const edgeId of candidate.pathEdges) {
-      if (returnEdgesSet.has(edgeId)) {
-        overlapCount++;
-      }
+    // CORRECTION : Si on a déjà 3 boucles, arrêter
+    if (loops.length >= 3) {
+      console.log(`   ✅ Already have 3 loops, stopping candidate processing`);
+      break;
     }
-    const overlapRatio = candidate.pathEdges.length > 0 ? overlapCount / candidate.pathEdges.length : 0;
     
-    // Si le chevauchement est trop élevé (> 80%), essayer de trouver un meilleur chemin
-    if (overlapRatio > 0.8) {
-      console.log(`[LoopGenerator] Return path overlaps ${(overlapRatio * 100).toFixed(1)}% with forward path, trying to find alternative`);
-      // Essayer avec une restriction plus stricte : éviter aussi les nœuds du chemin aller
-      const forwardNodes = new Set(candidate.pathOut.slice(1, -1)); // Exclure le départ et l'arrivée
-      // Note: Pour l'instant, on accepte ce chemin mais on logge l'avertissement
-      // On pourrait implémenter une version plus sophistiquée qui évite aussi les nœuds intermédiaires
-    }
+    const returnResult: PathfindingResult = {
+      path: returnPath.path,
+      distance: returnPath.distance
+    };
     
       // Construire les edges du retour et calculer la distance réelle (essayer les deux sens)
       const returnEdges: string[] = [];
@@ -490,23 +577,41 @@ export function generateLoops(
     // Distance totale = somme réelle de toutes les edges
     const totalDist = outDistance + returnDistance;
     
+    console.log(`   📊 Complete loop:`);
+    console.log(`      - Forward: ${(outDistance / 1000).toFixed(2)} km`);
+    console.log(`      - Return: ${(returnDistance / 1000).toFixed(2)} km`);
+    console.log(`      - Total: ${(totalDist / 1000).toFixed(2)} km`);
+    console.log(`      - Target: ${(target / 1000).toFixed(2)} km`);
+    const distanceAccuracy = 1 - Math.abs(totalDist - target) / target;
+    console.log(`      - Accuracy: ${(distanceAccuracy * 100).toFixed(1)}%`);
+    
+    // CORRECTION : Accepter ±50% au lieu de ±40% pour avoir plus de boucles
+    if (distanceAccuracy < 0.5) {
+      console.log(`   ⚠️  Distance too far from target (${(distanceAccuracy * 100).toFixed(1)}% accuracy), skipping`);
+      continue;
+    }
+    
     // Combiner aller + retour
     const fullLoop = [...candidate.pathOut, ...returnResult.path.slice(1)]; // Éviter la duplication du point de retour
     const allEdges = [...candidate.pathEdges, ...returnEdges];
-    const avgQuality = (candidate.qualityScore + averageEdgeQuality(graph, returnEdges)) / 2;
+    
+    // CORRECTION : Quality score entre 0-1 (limiter à 1.0)
+    const qualityScore = Math.min(1.0, (1 - returnPath.overlapRatio) * distanceAccuracy);
     
     loops.push({
       loop: fullLoop,
       pathEdges: allEdges,
       distance: totalDist, // Distance en mètres
-      qualityScore: avgQuality,
+      qualityScore: qualityScore, // CORRECTION : 0-1 au lieu de 0-100
       debug: {
         outPath: candidate.pathOut,
         returnPath: returnResult.path,
         outDistance,
         returnDistance,
         totalDistance: totalDist,
-        score: candidate.score
+        score: candidate.score,
+        overlapRatio: returnPath.overlapRatio,
+        distanceAccuracy
       }
     });
   }
@@ -668,7 +773,7 @@ export function generateLoops(
         loop: [...bestCandidate.pathOut, start],
         pathEdges: bestCandidate.pathEdges,
         distance: calculatedDistance,
-        qualityScore: bestCandidate.qualityScore,
+        qualityScore: Math.min(1.0, bestCandidate.qualityScore / 100), // CORRECTION : Convertir de 0-100 à 0-1
         debug: { note: 'Minimal fallback loop (too short)', calculatedDistance }
       };
       loops.push(simpleLoop);
@@ -677,20 +782,48 @@ export function generateLoops(
   }
 
   debug.timings.total = Date.now() - t0;
-  return { loops, debug };
+  
+  // CORRECTION : Trier les boucles par quality_score et limiter à 3
+  loops.sort((a, b) => b.qualityScore - a.qualityScore);
+  const topLoops = loops.slice(0, 3);
+  
+  console.log(`\n✅ Generated ${loops.length} loops total, returning top ${topLoops.length}`);
+  if (topLoops.length > 0) {
+    console.log(`📊 Loop quality scores (top ${topLoops.length}):`);
+    topLoops.forEach((loop, i) => {
+      const overlap = (loop.debug as any)?.overlapRatio || 0;
+      console.log(`   ${i + 1}. ${(loop.distance / 1000).toFixed(2)}km, score=${loop.qualityScore.toFixed(2)}, overlap=${(overlap * 100).toFixed(0)}%`);
+    });
+  }
+  
+  return { loops: topLoops, debug };
 }
 
 // ------------------------------------------------------------------------
 // UTILS PHASE RADIALE, SCORING, ETC
 // ------------------------------------------------------------------------
 
-// Renvoie 8 directions N, NE, E, SE...
+// Renvoie 8 directions en degrés (0°=Nord, 90°=Est, 180°=Sud, 270°=Ouest)
 function getDirections(): [number, number][] {
+  // Convertir les directions cardinales en angles
   return [ [0,1],[1,1],[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[-1,1] ]
 }
 
-// Exploration radiale = Exploration BFS depuis le point de départ avec limite de distance
-// Prend en compte la direction souhaitée et explore plus agressivement
+// Convertit une direction vectorielle [x,y] en angle en degrés (0-360)
+function vectorToBearing(direction: [number, number]): number {
+  const [x, y] = direction;
+  // Normaliser
+  const norm = Math.sqrt(x ** 2 + y ** 2);
+  if (norm === 0) return 0;
+  
+  // Calculer l'angle : atan2(y, x) donne l'angle depuis l'axe des x
+  // Mais on veut depuis le Nord (0° = Nord), donc on ajuste
+  let angle = Math.atan2(x, y) * 180 / Math.PI;
+  if (angle < 0) angle += 360;
+  return angle;
+}
+
+// Exploration radiale STRICTE dans UNE direction donnée avec pénalisation des déviations
 function radialExplore(graph: Graph, startId: string, direction: [number, number], maxDist: number): PathfindingResult | null {
   const startNode = graph.nodes.get(startId);
   if (!startNode) return null;
@@ -700,34 +833,37 @@ function radialExplore(graph: Graph, startId: string, direction: [number, number
     return null;
   }
   
-  // Normaliser la direction
-  const dirNorm = Math.sqrt(direction[0] ** 2 + direction[1] ** 2);
-  const dirX = direction[0] / dirNorm;
-  const dirY = direction[1] / dirNorm;
+  // Convertir la direction vectorielle en angle en degrés
+  const targetDirection = vectorToBearing(direction);
+  console.log(`   🧭 Exploring direction ${targetDirection.toFixed(0)}° (strict mode)`);
   
-  // Exploration BFS avec scoring directionnel
-  const queue: [string, number, string[], number][] = [[startId, 0, [startId], 0]]; // [nodeId, dist, path, directionalScore]
+  // Exploration BFS avec scoring directionnel STRICT
+  const queue: [string, number, string[]][] = [[startId, 0, [startId]]]; // [nodeId, dist, path]
   const visited = new Set<string>();
-  const nodeToPath = new Map<string, string[]>(); // Pour reconstruire le chemin
   let bestNode: string | null = null;
-  let bestScore = -Infinity; // Score combinant distance et direction
-  let bestPath: string[] = [startId]; // Chemin BFS vers le meilleur nœud
+  let bestScore = -Infinity;
+  let bestPath: string[] = [startId];
   
-  // Ne pas avoir de seuil minimum trop strict - on veut explorer le plus loin possible
-  // Le seuil sera utilisé seulement pour le scoring, pas pour filtrer
-  const minDist = 0; // Pas de seuil minimum, explorer tout
-  
-  let maxIterations = 50000; // Limite de sécurité
+  const maxIterations = 15000; // Augmenté de 10k à 15k pour explorer plus loin
   let iterations = 0;
   let maxDistanceFound = 0;
   
+  // CORRECTION : Distance cible : 87.5% de maxDist (au lieu de 50%)
+  // maxDist représente 55% de la boucle totale, donc targetDistance = 87.5% de 55% = ~48% de la boucle
+  // On cherche ensuite entre 80-95% de targetDistance, soit 38-45% de la boucle
+  const targetDistance = maxDist * 0.875;
+  
+  // Trier la queue par distance (exploration en largeur)
   while (queue.length > 0 && iterations < maxIterations) {
     iterations++;
-    const [currentId, dist, path, _] = queue.shift()!;
+    
+    // Trier par distance pour exploration en largeur
+    queue.sort((a, b) => a[1] - b[1]);
+    const [currentId, dist, path] = queue.shift()!;
     
     if (visited.has(currentId)) continue;
-    // Permettre une exploration beaucoup plus large
-    if (dist > maxDist * 10.0) continue; // Permettre jusqu'à 10x la distance cible
+    // CORRECTION : Arrêter si on dépasse 110% de la distance cible (au lieu de 105%) pour explorer plus loin
+    if (dist > maxDist * 1.1) continue;
     visited.add(currentId);
     
     // Tracker la distance maximale trouvée
@@ -736,76 +872,85 @@ function radialExplore(graph: Graph, startId: string, direction: [number, number
     }
     
     const node = graph.nodes.get(currentId);
-    if (!node) continue;
+    if (!node || !node.connections || node.connections.length === 0) continue;
     
-    // Vérifier que le nœud a des connexions
-    if (!node.connections || node.connections.length === 0) {
-      continue; // Passer au suivant si pas de connexions
+    // Calculer le bearing depuis le départ vers ce nœud
+    const bearingFromStart = calculateBearing(startNode.lat, startNode.lon, node.lat, node.lon);
+    
+    // Calculer l'écart angulaire par rapport à la direction cible
+    let angularDeviation = Math.abs(bearingFromStart - targetDirection);
+    if (angularDeviation > 180) angularDeviation = 360 - angularDeviation;
+    
+    // CORRECTION : Rejeter seulement les nœuds qui dévient beaucoup (>120° au lieu de 90°) pour avoir plus de candidats
+    if (angularDeviation > 120) {
+      continue; // Ignorer ce nœud, il n'est pas dans la bonne direction
     }
     
-    // Calculer le score directionnel : favoriser les nœuds dans la bonne direction
-    const dx = node.lon - startNode.lon;
-    const dy = node.lat - startNode.lat;
-    const distFromStart = Math.sqrt(dx ** 2 + dy ** 2);
+    // CORRECTION : Chercher entre 70-100% de targetDistance (au lieu de 80-95%) pour avoir plus de candidats
+    // Optimal à 85% pour mieux atteindre la distance cible
+    const distanceRatio = dist / targetDistance;
     
-    if (distFromStart > 0.001) { // Éviter division par zéro
-      const nodeDirX = dx / distFromStart;
-      const nodeDirY = dy / distFromStart;
-      const dotProduct = nodeDirX * dirX + nodeDirY * dirY; // Produit scalaire [-1, 1]
-      const directionalScore = (dotProduct + 1) / 2; // Normaliser à [0, 1]
+    if (distanceRatio >= 0.70 && distanceRatio <= 1.0) {
+      // Calculer le score
+      const distanceScore = 1 - Math.abs(distanceRatio - 0.85) * 6.67; // Optimal à 85%
+      const directionScore = 1 - (angularDeviation / 90); // 1.0 si parfait, 0.0 si 90°
+      const connectivityScore = Math.min(node.connections.length / 10, 0.1); // Bonus si intersection
       
-      // Score combiné : distance * (1 + bonus directionnel)
-      // Plus la distance est grande ET plus on est dans la bonne direction, meilleur le score
-      const combinedScore = dist * (1 + directionalScore * 0.5);
+      const totalScore = distanceScore * 0.5 + directionScore * 0.4 + connectivityScore * 0.1;
       
-      // Garder le meilleur nœud (plus loin = meilleur)
-      // Ne pas filtrer par minDist, on veut le nœud le plus éloigné
-      if (dist > bestScore || (dist === bestScore && combinedScore > bestScore)) {
-        bestScore = dist; // Utiliser la distance réelle comme score principal
+      if (totalScore > bestScore) {
+        bestScore = totalScore;
         bestNode = currentId;
         bestPath = path;
+        console.log(`      ✨ New best: ${currentId} at ${(dist / 1000).toFixed(2)}km, dir ${bearingFromStart.toFixed(0)}° (dev: ${angularDeviation.toFixed(0)}°), score=${totalScore.toFixed(2)}`);
       }
     }
     
-    // Stocker le chemin vers ce nœud
-    nodeToPath.set(currentId, path);
+    // CORRECTION : Continuer jusqu'à 110% de targetDistance (au lieu de 105%) pour explorer plus loin
+    if (distanceRatio > 1.1) continue;
     
-    // Explorer les voisins
-    for (const nextId of node.connections) {
-      // Essayer les deux sens de l'edge (currentId-nextId et nextId-currentId)
-      let edge = graph.edges.get(`${currentId}-${nextId}`);
+    // Explorer les voisins avec pénalisation directionnelle
+    for (const neighborId of node.connections) {
+      if (visited.has(neighborId)) continue;
+      
+      let edge = graph.edges.get(`${currentId}-${neighborId}`);
       if (!edge) {
-        edge = graph.edges.get(`${nextId}-${currentId}`);
+        edge = graph.edges.get(`${neighborId}-${currentId}`);
+      }
+      if (!edge) continue;
+      
+      const neighborNode = graph.nodes.get(neighborId);
+      if (!neighborNode) continue;
+      
+      // Calculer la direction de cette arête
+      const edgeBearing = calculateBearing(node.lat, node.lon, neighborNode.lat, neighborNode.lon);
+      
+      // Calculer l'écart par rapport à la direction cible
+      let bearingDiff = Math.abs(edgeBearing - targetDirection);
+      if (bearingDiff > 180) bearingDiff = 360 - bearingDiff;
+      
+      // CORRECTION : Réduire les pénalités pour explorer plus largement et trouver plus de candidats
+      let edgeWeight = edge.distance;
+      
+      if (bearingDiff > 135) {
+        edgeWeight *= 10; // Réduit de x20 à x10 pour explorer plus largement
+      } else if (bearingDiff > 90) {
+        edgeWeight *= 3; // Réduit de x5 à x3
+      } else if (bearingDiff > 45) {
+        edgeWeight *= 1.5; // Réduit de x2 à x1.5
       }
       
-      if (!edge || visited.has(nextId)) continue;
+      const newDist = dist + edgeWeight;
       
-      const newDist = dist + edge.distance;
-      // Permettre une exploration beaucoup plus large pour atteindre la distance cible
-      if (newDist <= maxDist * 10.0) { // Permettre jusqu'à 10x pour explorer vraiment loin
-        // Calculer le score directionnel pour le prochain nœud
-        const nextNode = graph.nodes.get(nextId);
-        if (nextNode) {
-          const nextDx = nextNode.lon - startNode.lon;
-          const nextDy = nextNode.lat - startNode.lat;
-          const nextDistFromStart = Math.sqrt(nextDx ** 2 + nextDy ** 2);
-          let nextDirScore = 0;
-          if (nextDistFromStart > 0.001) {
-            const nextDirX = nextDx / nextDistFromStart;
-            const nextDirY = nextDy / nextDistFromStart;
-            const nextDot = nextDirX * dirX + nextDirY * dirY;
-            nextDirScore = (nextDot + 1) / 2;
-          }
-          const newPath = [...path, nextId];
-          queue.push([nextId, newDist, newPath, nextDirScore]);
-          nodeToPath.set(nextId, newPath);
-        }
+      // CORRECTION : Continuer jusqu'à 110% (au lieu de 105%) pour explorer plus loin
+      if (newDist <= maxDist * 1.1) {
+        queue.push([neighborId, newDist, [...path, neighborId]]);
       }
     }
     
     // Log périodique pour debug
     if (iterations % 1000 === 0 && iterations > 0) {
-      console.log(`[radialExplore] Iteration ${iterations}, queue size: ${queue.length}, visited: ${visited.size}, max dist: ${(maxDistanceFound / 1000).toFixed(3)}km`);
+      console.log(`      [radialExplore] Iteration ${iterations}, queue: ${queue.length}, visited: ${visited.size}, max dist: ${(maxDistanceFound / 1000).toFixed(3)}km`);
     }
   }
   
@@ -815,102 +960,133 @@ function radialExplore(graph: Graph, startId: string, direction: [number, number
   
   // Log pour debug
   if (iterations > 0) {
-    console.log(`[radialExplore] Explored ${visited.size} nodes, max distance: ${(maxDistanceFound / 1000).toFixed(3)}km, best node: ${bestNode}, iterations: ${iterations}`);
+    console.log(`      [radialExplore] Explored ${visited.size} nodes, max distance: ${(maxDistanceFound / 1000).toFixed(3)}km, best node: ${bestNode}, iterations: ${iterations}`);
   }
   
-  // Si on a trouvé un bon nœud, utiliser dijkstra pour trouver le meilleur chemin
-  if (bestNode && bestNode !== startId) {
-    console.log(`[radialExplore] Using Dijkstra to find path from ${startId} to ${bestNode}, target distance: ${(maxDist / 1000).toFixed(3)}km`);
-    // Utiliser une limite très large pour dijkstra pour explorer vraiment loin
-    const result = dijkstra(graph, startId, bestNode, maxDist * 10, 10000); // Limite très large
-    if (result) {
-      console.log(`[radialExplore] Dijkstra found path: ${(result.distance / 1000).toFixed(3)}km, ${result.path.length} nodes`);
-    } else {
-      console.log(`[radialExplore] Dijkstra failed, using BFS path instead`);
-    }
-    // Si dijkstra échoue mais qu'on a un chemin dans visited, utiliser le chemin BFS
-    if (!result && bestNode && bestPath.length > 1) {
-      // Fallback : construire le résultat depuis le chemin BFS
-      let totalDistance = 0;
-      for (let i = 0; i < bestPath.length - 1; i++) {
-        const edge = graph.edges.get(`${bestPath[i]}-${bestPath[i + 1]}`);
-        if (edge) {
-          totalDistance += edge.distance;
-        }
+  // Si on a trouvé un bon nœud, retourner le chemin BFS directement
+  if (bestNode && bestNode !== startId && bestPath.length > 1) {
+    // Calculer la distance réelle du chemin
+    let totalDistance = 0;
+    for (let i = 0; i < bestPath.length - 1; i++) {
+      let edge = graph.edges.get(`${bestPath[i]}-${bestPath[i + 1]}`);
+      if (!edge) {
+        edge = graph.edges.get(`${bestPath[i + 1]}-${bestPath[i]}`);
       }
-      return {
-        path: bestPath,
-        distance: totalDistance
-      };
-    }
-    return result;
-  }
-  
-  // Si aucun nœud n'a été trouvé avec le seuil minimum, essayer sans seuil
-  if (bestNode === null && nodeToPath.size > 1) {
-    // Trouver le nœud le plus éloigné (même très court)
-    let farthestDist = 0;
-    let farthestNode: string | null = null;
-    let farthestPath: string[] = [startId];
-    const minFallbackDist = maxDist * 0.005; // Très permissif : 0.5% de la distance cible
-    
-    for (const [nodeId, path] of nodeToPath.entries()) {
-      if (nodeId === startId) continue;
-      let pathDist = 0;
-      for (let i = 0; i < path.length - 1; i++) {
-        let edge = graph.edges.get(`${path[i]}-${path[i + 1]}`);
-        if (!edge) {
-          edge = graph.edges.get(`${path[i + 1]}-${path[i]}`);
-        }
-        if (edge) pathDist += edge.distance;
-      }
-      if (pathDist > farthestDist && pathDist >= minFallbackDist) {
-        farthestDist = pathDist;
-        farthestNode = nodeId;
-        farthestPath = path;
+      if (edge) {
+        totalDistance += edge.distance;
       }
     }
     
-    if (farthestNode && farthestPath.length > 1) {
-      return {
-        path: farthestPath,
-        distance: farthestDist
-      };
-    }
+    console.log(`      ✅ Found path: ${bestNode} at ${(totalDistance / 1000).toFixed(2)}km, ${bestPath.length} nodes`);
+    return {
+      path: bestPath,
+      distance: totalDistance
+    };
   }
   
-  // Dernier recours : si on a exploré des nœuds mais aucun ne satisfait les critères, retourner le plus éloigné quand même
-  if (nodeToPath.size > 1 && visited.size > 1) {
-    let maxDistFound = 0;
-    let farthestNode: string | null = null;
-    let farthestPath: string[] = [startId];
-    
-    for (const [nodeId, path] of nodeToPath.entries()) {
-      if (nodeId === startId) continue;
-      let pathDist = 0;
-      for (let i = 0; i < path.length - 1; i++) {
-        let edge = graph.edges.get(`${path[i]}-${path[i + 1]}`);
-        if (!edge) {
-          edge = graph.edges.get(`${path[i + 1]}-${path[i]}`);
-        }
-        if (edge) pathDist += edge.distance;
-      }
-      if (pathDist > maxDistFound) {
-        maxDistFound = pathDist;
-        farthestNode = nodeId;
-        farthestPath = path;
-      }
-    }
-    
-    if (farthestNode && farthestPath.length > 1 && maxDistFound > 0) {
-      return {
-        path: farthestPath,
-        distance: maxDistFound
-      };
-    }
-  }
-  
+  console.log(`      ❌ No suitable candidate found`);
   return null;
+}
+
+/**
+ * Calcule le chemin de retour en évitant les arêtes de l'aller
+ */
+function calculateReturnPath(
+  graph: Graph,
+  fromNodeId: string,
+  toNodeId: string,
+  explorationEdges: string[],
+  maxDistance: number
+): {
+  path: string[];
+  distance: number;
+  overlapRatio: number;
+} | null {
+  console.log(`      🔙 calculateReturnPath: ${fromNodeId} → ${toNodeId}`);
+  
+  // Créer un Set des arêtes à éviter (aller + inverses)
+  const avoidEdges = new Set<string>();
+  for (const edgeId of explorationEdges) {
+    avoidEdges.add(edgeId);
+    // Ajouter aussi l'edge inverse
+    const parts = edgeId.split('-');
+    if (parts.length === 2) {
+      avoidEdges.add(`${parts[1]}-${parts[0]}`);
+    }
+  }
+  
+  console.log(`         Avoiding ${avoidEdges.size} edges (forward + reverse)`);
+  
+  // CORRECTION : Pénalisation x50 des edges de l'aller
+  const edgeWeightMultiplier = (edgeId: string, edge: any) => {
+    if (avoidEdges.has(edgeId) || avoidEdges.has(edge.id)) {
+      return 50; // PÉNALITÉ X50
+    }
+    return 1;
+  };
+  
+  // Première tentative : avec pénalisation x50
+  const result = dijkstra(graph, fromNodeId, toNodeId, maxDistance, 20000, avoidEdges, edgeWeightMultiplier);
+  
+  if (!result) {
+    console.log(`         ❌ No return path found with penalty, trying without penalty`);
+    // Deuxième tentative : sans pénalisation
+    const result2 = dijkstra(graph, fromNodeId, toNodeId, maxDistance, 20000);
+    if (!result2) {
+      console.log(`         ❌ No return path found at all`);
+      return null;
+    }
+    
+    // Calculer l'overlap pour le résultat sans pénalisation
+    const returnEdgesSet = new Set<string>();
+    for (let i = 0; i < result2.path.length - 1; i++) {
+      const from = result2.path[i];
+      const to = result2.path[i + 1];
+      let edge = graph.edges.get(`${from}-${to}`);
+      if (!edge) {
+        edge = graph.edges.get(`${to}-${from}`);
+      }
+      if (edge) {
+        returnEdgesSet.add(edge.id);
+      }
+    }
+    
+    const overlapCount = Array.from(returnEdgesSet).filter(e => avoidEdges.has(e)).length;
+    const overlapRatio = returnEdgesSet.size > 0 ? overlapCount / returnEdgesSet.size : 0;
+    
+    console.log(`         ⚠️  Fallback path: ${result2.path.length} nodes, ${(result2.distance / 1000).toFixed(2)}km, overlap=${(overlapRatio * 100).toFixed(1)}%`);
+    
+    return {
+      path: result2.path,
+      distance: result2.distance,
+      overlapRatio
+    };
+  }
+  
+  // Calculer l'overlap
+  const returnEdgesSet = new Set<string>();
+  for (let i = 0; i < result.path.length - 1; i++) {
+    const from = result.path[i];
+    const to = result.path[i + 1];
+    let edge = graph.edges.get(`${from}-${to}`);
+    if (!edge) {
+      edge = graph.edges.get(`${to}-${from}`);
+    }
+    if (edge) {
+      returnEdgesSet.add(edge.id);
+    }
+  }
+  
+  const overlapCount = Array.from(returnEdgesSet).filter(e => avoidEdges.has(e)).length;
+  const overlapRatio = returnEdgesSet.size > 0 ? overlapCount / returnEdgesSet.size : 0;
+  
+  console.log(`         ✅ Path: ${result.path.length} nodes, ${(result.distance / 1000).toFixed(2)}km, overlap: ${(overlapRatio * 100).toFixed(1)}%`);
+  
+  return {
+    path: result.path,
+    distance: result.distance,
+    overlapRatio
+  };
 }
 
 function computeAngle(graph: Graph, start: string, end: string): number {

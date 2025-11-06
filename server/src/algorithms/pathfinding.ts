@@ -5,7 +5,7 @@ export interface PathfindingResult {
   distance: number;
 }
 
-export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=3000, maxNodes=500, forbiddenEdges?: Set<string>): PathfindingResult|null {
+export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=3000, maxNodes=500, forbiddenEdges?: Set<string>, edgeWeightMultiplier?: (edgeId: string, edge: any) => number): PathfindingResult|null {
   // Simple BFS avec distance
   const queue: [string, number, string[]][] = [[start, 0, [start]]];
   const visited = new Set<string>();
@@ -29,7 +29,14 @@ export function dijkstra(graph: Graph, start: string, goal: string, maxDistance=
         continue;
       }
       
-      queue.push([v, dist+e.distance, [...path, v]]);
+      // Appliquer le multiplicateur de poids si fourni
+      let edgeWeight = e.distance;
+      if (edgeWeightMultiplier) {
+        const multiplier = edgeWeightMultiplier(e.id, e);
+        edgeWeight = e.distance * multiplier;
+      }
+      
+      queue.push([v, dist + edgeWeight, [...path, v]]);
     }
   }
   return null;

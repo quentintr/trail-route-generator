@@ -537,14 +537,36 @@ router.post('/generate', async (req, res) => {
         });
       }
       
-      for (const loop of loops.slice(0, 1)) {
-          // Construire les coordonnées depuis les nœuds du loop
+      // CORRECTION : Limiter à 3 boucles au lieu de 5
+      const topLoops = loops.slice(0, 3);
+      console.log(`\n📊 Processing ${topLoops.length} loops (from ${loops.length} total, top 3)`);
+      
+      for (const loop of topLoops) {
+          // CORRECTION : Construire les coordonnées depuis les nœuds du loop
+          // IMPORTANT : S'assurer que TOUTES les coordonnées sont extraites
           const coordinates = Array.isArray(loop.loop) && loop.loop.length >= 2
             ? loop.loop.map(lid => {
                 const n = graph.nodes.get(lid);
-                return n ? [n.lon, n.lat] : undefined;
+                if (!n) {
+                  console.warn(`   ⚠️  Node ${lid} not found in graph!`);
+                  return undefined;
+                }
+                return [n.lon, n.lat] as [number, number];
               }).filter((coord): coord is [number, number] => coord !== undefined)
             : []
+          
+          console.log(`   📍 Loop ${loop.loop?.length || 0} nodes → ${coordinates.length} coordinates`);
+          
+          // Vérification de sécurité
+          if (!coordinates || coordinates.length === 0) {
+            console.error(`   ❌ ERROR: Loop has no coordinates!`);
+            console.error(`      Loop nodes: ${loop.loop?.length || 0}`);
+            console.error(`      Loop structure:`, JSON.stringify(loop).substring(0, 200));
+          }
+          
+          if (coordinates.length !== loop.loop?.length) {
+            console.warn(`   ⚠️  Mismatch: ${loop.loop?.length || 0} nodes but ${coordinates.length} coordinates`);
+          }
           
           // Recalculer la distance totale depuis les coordonnées réelles (plus fiable)
           let totalDistance = 0;
@@ -591,6 +613,7 @@ router.post('/generate', async (req, res) => {
           console.log(`   🔍 Distance check: calculated=${(totalDistance / 1000).toFixed(3)}km, loop.distance=${(loop.distance / 1000).toFixed(3)}km, final=${(finalDistance / 1000).toFixed(3)}km`)
           console.log(`   🔍 Coords: first=[${firstCoord ? `${firstCoord[0].toFixed(6)}, ${firstCoord[1].toFixed(6)}` : 'N/A'}], last=[${lastCoord ? `${lastCoord[0].toFixed(6)}, ${lastCoord[1].toFixed(6)}` : 'N/A'}], count=${coordinates.length}`)
           console.log(`   🔍 Path edges count: ${loop.pathEdges?.length || 0}`)
+          console.log(`   📤 Sending ${coordinates.length} coordinates to frontend`)
           
           // Vérifier qu'il n'y a pas de duplication d'edges
           if (loop.pathEdges) {
@@ -770,7 +793,7 @@ router.post('/generate', async (req, res) => {
             average_speed: parseFloat(averageSpeed.toFixed(1)), // Vitesse moyenne en km/h
             geometry: {
               type: 'LineString' as const,
-              coordinates
+              coordinates: coordinates // IMPORTANT : TOUTES les coordonnées ici (pas seulement waypoints)
             },
             waypoints: coordinates.length > 0 ? [
               { 
@@ -786,7 +809,7 @@ router.post('/generate', async (req, res) => {
                 name: 'Arrivée'
               }
             ] : [],
-            quality_score: loop.qualityScore || 0,
+            quality_score: Math.min(1.0, Math.max(0, loop.qualityScore || 0)), // CORRECTION : Limiter entre 0-1
             pathEdges: loop.pathEdges || [],
             surface_breakdown: surfaceBreakdown, // Nouvelle information de surface
             elevation_profile: elevationProfile.length > 0 ? elevationProfile : [],
@@ -796,11 +819,38 @@ router.post('/generate', async (req, res) => {
         processedRoutes.push(route);
       }
       
+      // Log final pour vérifier les coordonnées
+      console.log(`\n📤 Sending ${processedRoutes.length} route(s) to frontend:`);
+      processedRoutes.forEach((route, index) => {
+        const coordCount = route.geometry?.coordinates?.length || 0;
+        const waypointsCount = route.waypoints?.length || 0;
+        console.log(`   Route ${index + 1}: ${coordCount} coordinates, ${waypointsCount} waypoints, ${route.distance?.toFixed(2)}km, quality=${route.quality_score?.toFixed(2) || 'N/A'}`);
+        
+        // Vérification critique : s'assurer que geometry.coordinates contient bien toutes les coordonnées
+        if (coordCount === 0) {
+          console.error(`   ❌ CRITICAL: Route ${index + 1} has NO coordinates in geometry!`);
+        } else if (coordCount < 10) {
+          console.warn(`   ⚠️  Route ${index + 1} has only ${coordCount} coordinates (expected more)`);
+        }
+        
+        // Log des premières et dernières coordonnées pour vérification
+        if (coordCount > 0) {
+          const first = route.geometry?.coordinates?.[0];
+          const last = route.geometry?.coordinates?.[coordCount - 1];
+          console.log(`      First coord: [${first?.[0]?.toFixed(6)}, ${first?.[1]?.toFixed(6)}]`);
+          console.log(`      Last coord: [${last?.[0]?.toFixed(6)}, ${last?.[1]?.toFixed(6)}]`);
+        }
+      });
+      
       return res.json({
         success: true,
         method: 'custom_algorithm',
         routes: processedRoutes,
-        debug,
+        debug: {
+          ...debug,
+          routes_sent: processedRoutes.length,
+          coordinates_per_route: processedRoutes.map(r => r.geometry?.coordinates?.length || 0)
+        },
         timing: totalTime
       });
     } catch (customError) {

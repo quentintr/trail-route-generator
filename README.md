@@ -98,139 +98,138 @@ CREATE DATABASE trail_route_generator;
 CREATE EXTENSION postgis;
 ```
 
-### 4. Configuration des variables d'environnement
-
-#### Backend
+#### Configurer les variables d'environnement
 ```bash
-cp env.example .env
-```
-
-Éditer le fichier `.env` avec vos paramètres :
-```env
-DATABASE_URL="postgresql://username:password@localhost:5432/trail_route_generator?schema=public"
-JWT_SECRET=your-super-secret-jwt-key-here
-```
-
-#### Frontend
-```bash
+# Copier les fichiers d'exemple
+cp server/env.example server/.env
 cp client/env.example client/.env
+
+# Éditer server/.env
+DATABASE_URL="postgresql://user:password@localhost:5432/trail_route_generator"
+JWT_SECRET="your-secret-key"
+PORT=3001
 ```
 
-Éditer le fichier `client/.env` :
-```env
-VITE_API_URL=http://localhost:5000/api
-VITE_MAPBOX_TOKEN=your-mapbox-token-here
-```
-
-### 5. Initialiser la base de données
+### 4. Initialiser la base de données
 ```bash
 cd server
 npm run db:generate
 npm run db:push
 ```
 
-## 🚀 Démarrage
-
-### Mode développement
+### 5. Lancer l'application
 ```bash
-# Démarrer le frontend et le backend simultanément
+# Terminal 1 - Backend
+cd server
 npm run dev
 
-# Ou démarrer séparément
-npm run dev:client  # Frontend sur http://localhost:3000
-npm run dev:server  # Backend sur http://localhost:5000
+# Terminal 2 - Frontend
+cd client
+npm run dev
 ```
 
-### Mode production
-```bash
-# Construire tous les projets
-npm run build
+L'application sera accessible sur :
+- Frontend : http://localhost:8181
+- Backend : http://localhost:3001
 
-# Démarrer le serveur
-cd server
-npm start
-```
-
-## 📝 Scripts Disponibles
-
-### Racine
-- `npm run dev` - Démarre le frontend et le backend en mode développement
-- `npm run build` - Construit tous les projets
-- `npm run install:all` - Installe toutes les dépendances
-- `npm run clean` - Nettoie tous les node_modules et dist
-
-### Frontend (client/)
-- `npm run dev` - Serveur de développement Vite
-- `npm run build` - Build de production
-- `npm run preview` - Prévisualisation du build
-- `npm run lint` - Linting ESLint
-
-### Backend (server/)
-- `npm run dev` - Serveur de développement avec hot reload
-- `npm run build` - Build TypeScript
-- `npm run start` - Serveur de production
-- `npm run db:generate` - Génère le client Prisma
-- `npm run db:push` - Pousse le schéma vers la DB
-- `npm run db:migrate` - Exécute les migrations
-- `npm run db:studio` - Interface Prisma Studio
-
-## 🗄️ Base de Données
-
-### Schéma Prisma
-Le schéma Prisma définit les modèles pour :
-- **Users** - Utilisateurs de l'application
-- **Trails** - Sentiers de randonnée
-- **Routes** - Itinéraires générés
-- **Waypoints** - Points d'intérêt
-- **Reviews** - Avis et notes
-
-### Migrations
-```bash
-# Créer une nouvelle migration
-npm run db:migrate
-
-# Réinitialiser la base de données
-npm run db:push --force-reset
-```
-
-## 🗺️ Fonctionnalités
-
-### Frontend
-- 🗺️ **Cartes interactives** avec Leaflet
-- 🎨 **Interface moderne** avec TailwindCSS
-- 📱 **Design responsive**
-- 🔍 **Recherche de sentiers**
-- 📍 **Génération d'itinéraires**
-- ⭐ **Système de notation**
-- 👤 **Authentification utilisateur**
+## 🧪 Tests
 
 ### Backend
-- 🔐 **Authentification JWT**
-- 🗄️ **API REST complète**
-- 📊 **Données géographiques PostGIS**
-- 🛡️ **Sécurité avec Helmet et CORS**
-- 📝 **Validation avec Zod**
-- 🚀 **Performance optimisée**
+
+```bash
+cd server
+npm test                  # Tous les tests
+npm run test:watch        # Mode watch
+npm run test:coverage     # Avec couverture
+```
+
+**Tests disponibles :**
+- `tests/unit/algorithms/loop-generator.test.ts` - Tests de l'algorithme de génération de boucles
+- `tests/unit/algorithms/pathfinding.test.ts` - Tests des algorithmes de pathfinding
+- `tests/unit/utils/geo-utils.test.ts` - Tests des utilitaires géographiques
+- `tests/integration/routes.test.ts` - Tests d'intégration de l'API routes
+- `tests/integration/osm-loader.test.ts` - Tests du chargement OSM
+
+### Frontend
+
+```bash
+cd client
+npm test                  # Tous les tests
+npm run test:watch        # Mode watch
+npm run test:coverage     # Avec couverture
+npm run test:ui           # Interface graphique
+npm run test:e2e          # Tests E2E (Playwright)
+```
+
+**Tests disponibles :**
+- `tests/components/SearchForm.test.tsx` - Tests du formulaire de recherche
+- `tests/components/MapView.test.tsx` - Tests de la carte
+- `tests/components/RouteCard.test.tsx` - Tests de la carte de route
+- `tests/integration/route-generation.test.tsx` - Tests d'intégration de génération
+- `tests/e2e/full-workflow.test.ts` - Tests E2E du workflow complet
+
+### Couverture minimale requise
+
+- **Lignes** : 70%
+- **Fonctions** : 70%
+- **Branches** : 70%
+- **Statements** : 70%
+
+## 📚 Documentation
+
+### API
+
+L'API est documentée avec Swagger/OpenAPI. Accédez à la documentation sur :
+- http://localhost:3001/api-docs (si configuré)
+
+### Endpoints principaux
+
+#### Génération de routes
+```
+POST /api/routes/generate
+Body: {
+  start_lat: number,
+  start_lon: number,
+  distance: number,      // en km
+  pace: number,          // en min/km
+  terrain_type: 'paved' | 'unpaved' | 'mixed',
+  difficulty?: 'easy' | 'medium' | 'hard' | 'expert'
+}
+```
+
+#### Liste des routes
+```
+GET /api/routes
+Query params: ?page=1&limit=10
+```
+
+## 🚀 Déploiement
+
+### Production
+
+```bash
+# Build
+cd server && npm run build
+cd client && npm run build
+
+# Démarrer
+cd server && npm start
+```
+
+### Docker (optionnel)
+
+```bash
+docker-compose up -d
+```
 
 ## 🤝 Contribution
 
 1. Fork le projet
-2. Créer une branche feature (`git checkout -b feature/AmazingFeature`)
+2. Créer une branche (`git checkout -b feature/AmazingFeature`)
 3. Commit les changements (`git commit -m 'Add some AmazingFeature'`)
 4. Push vers la branche (`git push origin feature/AmazingFeature`)
 5. Ouvrir une Pull Request
 
-## 📄 Licence
+## 📝 Licence
 
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
-
-## 🆘 Support
-
-Pour toute question ou problème :
-- Ouvrir une issue sur GitHub
-- Consulter la documentation
-- Contacter l'équipe de développement
-
----
-
-**Développé avec ❤️ pour les amoureux de la randonnée**
+Ce projet est sous licence MIT.

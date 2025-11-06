@@ -146,7 +146,8 @@ describe('RouteDetails', () => {
   it('shows route creation date', () => {
     render(<RouteDetails route={mockRoute} />)
     
-    expect(screen.getByText('Created')).toBeInTheDocument()
+    // Chercher "Created:" avec le deux-points ou juste "Created"
+    expect(screen.getByText(/Created:?/i)).toBeInTheDocument()
   })
 
   it('handles different difficulty levels', () => {

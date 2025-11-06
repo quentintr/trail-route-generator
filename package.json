@@ -9,6 +9,10 @@
     "shared"
   ],
   "scripts": {
+    "test:docker:backend": "docker-compose -f docker-compose.test.yml --profile test-backend up --abort-on-container-exit server-test",
+    "test:docker:frontend": "docker-compose -f docker-compose.test.yml --profile test-frontend up --abort-on-container-exit client-test",
+    "test:docker:all": "docker-compose -f docker-compose.test.yml --profile test-backend --profile test-frontend up --abort-on-container-exit",
+    "test:docker:coverage": "docker-compose -f docker-compose.test.yml --profile test-backend-coverage --profile test-frontend-coverage up --abort-on-container-exit",
     "dev": "npm run dev:client",
     "dev:client": "cd client && npm run dev",
     "dev:server": "cd server && npm run dev",
@@ -23,7 +27,16 @@
     "clean": "npm run clean:client && npm run clean:server && npm run clean:shared",
     "clean:client": "cd client && rm -rf node_modules dist",
     "clean:server": "cd server && rm -rf node_modules dist",
-    "clean:shared": "cd shared && rm -rf node_modules dist"
+    "clean:shared": "cd shared && rm -rf node_modules dist",
+    "test": "npm run test:client && npm run test:server",
+    "test:client": "cd client && npm test",
+    "test:server": "cd server && npm test",
+    "test:watch": "npm run test:client:watch",
+    "test:client:watch": "cd client && npm run test:watch",
+    "test:server:watch": "cd server && npm run test:watch",
+    "test:coverage": "npm run test:client:coverage && npm run test:server:coverage",
+    "test:client:coverage": "cd client && npm run test:coverage",
+    "test:server:coverage": "cd server && npm run test:coverage"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

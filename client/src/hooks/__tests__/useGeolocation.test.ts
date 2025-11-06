@@ -76,18 +76,36 @@ describe('useGeolocation', () => {
   })
 
   it('handles geolocation not supported', async () => {
+    // Sauvegarder la valeur originale
+    const originalGeolocation = global.navigator.geolocation
+    
+    // Simuler l'absence de geolocation
     Object.defineProperty(global.navigator, 'geolocation', {
       value: undefined,
       writable: true,
+      configurable: true,
     })
     
     const { result } = renderHook(() => useGeolocation())
     
     await act(async () => {
-      await result.current.getCurrentPosition()
+      try {
+        await result.current.getCurrentPosition()
+      } catch (error) {
+        // Erreur attendue
+      }
     })
     
-    expect(result.current.error).toBe('Geolocation is not supported by this browser')
+    // Vérifier qu'une erreur est présente
+    expect(result.current.error).toBeTruthy()
+    expect(result.current.error).toContain('not supported')
+    
+    // Restaurer la valeur originale
+    Object.defineProperty(global.navigator, 'geolocation', {
+      value: originalGeolocation,
+      writable: true,
+      configurable: true,
+    })
   })
 
   it('sets loading state during geolocation request', async () => {

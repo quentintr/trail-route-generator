@@ -122,6 +122,20 @@ class ApiService {
     try {
       const response = await this.api.post('/api/routes/generate', request)
       console.log('API Service: Received response', response.data)
+      
+      // ✅ Vérification critique : vérifier que les coordonnées sont bien présentes
+      if (response.data?.routes && Array.isArray(response.data.routes)) {
+        response.data.routes.forEach((route: any, index: number) => {
+          const coordCount = route.geometry?.coordinates?.length || 0
+          console.log(`✅ API Service: Route ${index + 1} has ${coordCount} coordinates`)
+          
+          if (coordCount < 10) {
+            console.error(`❌ API Service: Route ${index + 1} has only ${coordCount} coordinates!`)
+            console.error('Route data:', JSON.stringify(route).substring(0, 500))
+          }
+        })
+      }
+      
       return response.data
     } catch (error) {
       console.error('API Service: Error in generateRoute', error)

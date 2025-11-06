@@ -1,0 +1,124 @@
+# Docker Compose pour l'exécution des tests
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL pour les tests
+  postgres-test:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: trail-routes-postgres-test
+    environment:
+      POSTGRES_DB: trail_routes_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5433:5432"  # Port différent pour éviter les conflits
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./server/scripts/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql
+    networks:
+      - trail-routes-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Tests Backend
+  server-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: trail-routes-server-test
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
+      - ./shared:/app/shared
+    environment:
+      - NODE_ENV=test
+      - DATABASE_URL=postgresql://postgres:postgres@postgres-test:5432/trail_routes_test
+      - PORT=3001
+      - JWT_SECRET=test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    networks:
+      - trail-routes-test-network
+    command: sh -c "npm install && npm test"
+    profiles:
+      - test-backend
+
+  # Tests Frontend
+  client-test:
+    build:
+      context: .
+      dockerfile: client/Dockerfile.dev
+    container_name: trail-routes-client-test
+    working_dir: /app/client
+    volumes:
+      - ./client:/app/client
+      - /app/client/node_modules
+    environment:
+      - NODE_ENV=test
+      - VITE_API_URL=http://localhost:3001
+    networks:
+      - trail-routes-test-network
+    command: sh -c "npm install && npm test"
+    profiles:
+      - test-frontend
+
+  # Tests Frontend avec couverture
+  client-test-coverage:
+    build:
+      context: .
+      dockerfile: client/Dockerfile.dev
+    container_name: trail-routes-client-test-coverage
+    working_dir: /app/client
+    volumes:
+      - ./client:/app/client
+      - /app/client/node_modules
+      - ./client/coverage:/app/client/coverage
+    environment:
+      - NODE_ENV=test
+      - VITE_API_URL=http://localhost:3001
+    networks:
+      - trail-routes-test-network
+    command: sh -c "npm install && npm run test:coverage"
+    profiles:
+      - test-frontend-coverage
+
+  # Tests Backend avec couverture
+  server-test-coverage:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: trail-routes-server-test-coverage
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
+      - ./shared:/app/shared
+      - ./server/coverage:/app/server/coverage
+    environment:
+      - NODE_ENV=test
+      - DATABASE_URL=postgresql://postgres:postgres@postgres-test:5432/trail_routes_test
+      - PORT=3001
+      - JWT_SECRET=test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    networks:
+      - trail-routes-test-network
+    command: sh -c "npm install && npm run test:coverage"
+    profiles:
+      - test-backend-coverage
+
+volumes:
+  postgres_test_data:
+    driver: local
+
+networks:
+  trail-routes-test-network:
+    driver: bridge
+

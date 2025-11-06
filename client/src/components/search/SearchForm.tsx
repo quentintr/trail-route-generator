@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -6,10 +6,23 @@ import { useNavigate } from 'react-router-dom'
 import { useGenerateRoute } from '../../hooks/useGenerateRoute'
 import { LocationPicker } from './LocationPicker'
 
+// Fonction pour convertir le pace (5:00) en minutes décimales (5.0)
+function paceToMinutes(pace: string): number {
+  const [minutes, seconds] = pace.split(':').map(Number)
+  return minutes + (seconds / 60)
+}
+
+// Fonction pour calculer la distance
+function calculateDistance(duration: number, pace: string): number {
+  const paceMinutes = paceToMinutes(pace)
+  const distance = duration / paceMinutes
+  return Math.round(distance * 10) / 10 // Arrondir à 1 décimale
+}
+
 // Schema de validation Zod
 const searchSchema = z.object({
-  distance: z.number().min(1, 'Distance must be at least 1km').max(50, 'Distance cannot exceed 50km'),
-  pace: z.string().min(1, 'Pace is required').regex(/^\d+:\d{2}$/, 'Pace must be in format MM:SS'),
+  duration: z.number().min(10, 'Duration must be at least 10 minutes').max(300, 'Duration cannot exceed 300 minutes'),
+  pace: z.string().min(1, 'Pace is required').regex(/^\d{1,2}:\d{2}$/, 'Pace must be in format MM:SS'),
   terrain_type: z.enum(['paved', 'unpaved', 'mixed'], {
     required_error: 'Please select a terrain type',
   }),
@@ -39,7 +52,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onRouteGenerated }) => {
   } = useForm<SearchFormData>({
     resolver: zodResolver(searchSchema),
     defaultValues: {
-      distance: 10,
+      duration: 60,
       pace: '5:00',
       terrain_type: 'mixed',
       location: {
@@ -50,19 +63,36 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onRouteGenerated }) => {
     },
   })
 
-  const distance = watch('distance')
+  const duration = watch('duration')
+  const pace = watch('pace')
   const terrainType = watch('terrain_type')
+  
+  // Calculer la distance automatiquement
+  const calculatedDistance = useMemo(() => {
+    if (duration && pace && pace.match(/^\d{1,2}:\d{2}$/)) {
+      return calculateDistance(duration, pace)
+    }
+    return 0
+  }, [duration, pace])
 
   const onSubmit = async (data: SearchFormData) => {
     try {
-      console.log('Submitting form with data:', data)
+      // Calculer la distance à partir de la durée et du pace
+      const distance = calculateDistance(data.duration, data.pace)
+      const paceMinutes = paceToMinutes(data.pace)
+      
+      console.log('Submitting form with data:', {
+        ...data,
+        calculatedDistance: distance,
+        paceMinutes: paceMinutes
+      })
+      
       const response = await generateRoute({
         start_lat: data.location.lat,
         start_lon: data.location.lng,
-        distance: data.distance,
+        distance: distance, // Distance calculée automatiquement
         terrain_type: data.terrain_type,
-        // Convert pace from MM:SS to minutes per km
-        pace: data.pace.split(':').reduce((acc, time, i) => acc + parseInt(time) / Math.pow(60, i), 0),
+        pace: paceMinutes, // Convert pace from MM:SS to minutes per km
       })
 
       console.log('Received response:', response)
@@ -86,42 +116,58 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onRouteGenerated }) => {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-      {/* Distance Slider */}
+      {/* Durée souhaitée */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Distance: {distance} km
+        <label htmlFor="duration" className="block text-sm font-medium text-gray-700 mb-2">
+          Durée souhaitée (minutes)
         </label>
         <input
-          {...register('distance', { valueAsNumber: true })}
-          type="range"
-          min="1"
-          max="50"
-          step="0.5"
-          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+          {...register('duration', { valueAsNumber: true })}
+          id="duration"
+          type="number"
+          min="10"
+          max="300"
+          step="5"
+          placeholder="60"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
-        <div className="flex justify-between text-xs text-gray-500 mt-1">
-          <span>1km</span>
-          <span>50km</span>
-        </div>
-        {errors.distance && (
-          <p className="mt-1 text-sm text-red-600">{errors.distance.message}</p>
+        <p className="mt-1 text-xs text-gray-500">Ex: 30, 45, 60 minutes</p>
+        {errors.duration && (
+          <p className="mt-1 text-sm text-red-600">{errors.duration.message}</p>
         )}
       </div>
 
-      {/* Pace Input */}
+      {/* Allure (pace) */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Target Pace (min/km)
+        <label htmlFor="pace" className="block text-sm font-medium text-gray-700 mb-2">
+          Allure (pace)
         </label>
         <input
           {...register('pace')}
+          id="pace"
           type="text"
           placeholder="5:00"
+          pattern="[0-9]{1,2}:[0-9]{2}"
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
-        <p className="mt-1 text-xs text-gray-500">Format: MM:SS (e.g., 5:30 for 5 minutes 30 seconds per km)</p>
+        <p className="mt-1 text-xs text-gray-500">Format: MM:SS (ex: 4:30, 5:00, 6:30 min/km)</p>
         {errors.pace && (
           <p className="mt-1 text-sm text-red-600">{errors.pace.message}</p>
+        )}
+      </div>
+
+      {/* Distance calculée */}
+      <div className="bg-indigo-50 border border-indigo-200 rounded-md p-4">
+        <div className="flex items-center justify-between">
+          <strong className="text-sm font-medium text-indigo-900">Distance calculée :</strong>
+          <span id="calculatedDistance" className="text-lg font-bold text-indigo-600">
+            {calculatedDistance > 0 ? `${calculatedDistance} km` : '-- km'}
+          </span>
+        </div>
+        {calculatedDistance > 0 && (
+          <p className="mt-2 text-xs text-indigo-700">
+            {duration} min × {pace} min/km = {calculatedDistance} km
+          </p>
         )}
       </div>
 
