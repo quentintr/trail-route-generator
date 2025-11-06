@@ -120,3 +120,12 @@ coverage/
 # Misc
 *.tgz
 *.tar.gz
+
+# Cache files
+server/cache/
+*.cache.json
+
+# Lock files (optionnel - certains projets les gardent)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
