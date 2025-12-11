@@ -87,7 +87,9 @@ export async function cleanupCache(): Promise<void> {
         }
       }
     }
-  } catch{}
+  } catch(error) {
+    console.error('[cache] Error during cache cleanup:', error)
+  }
 }
 
 export async function cacheStats(): Promise<{count:number, totalMB:number}> {
